@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# A pre-commit hook cannot intercept `git add -f`, but it can reject any
+# force-added/ignored file when a commit is attempted.
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+blocked=0
+
+reject() {
+  printf 'pre-commit: refusing to commit %s\n' "$1" >&2
+  blocked=1
+}
+
+while IFS= read -r -d '' path; do
+  # Reject anything ignored by this repository, including files staged with
+  # `git add -f`. This also protects future additions to .gitignore.
+  if git check-ignore --no-index -q -- "$path"; then
+    reject "$path (matched .gitignore; force-added files are not allowed)"
+    continue
+  fi
+
+  # Keep explicit checks for sensitive names even if the ignore rules change.
+  case "$path" in
+    .env|.env.*|*.pem|*.key|*.p12|*.pfx|credentials*.json|*/credentials*.json|secrets*.json|*/secrets*.json|agent/auth.json|agent/mcp-cache.json|agent/sessions/*)
+      [[ "$path" == ".env.example" ]] || reject "$path (sensitive filename)"
+      continue
+      ;;
+  esac
+
+  # Scan staged blob contents without printing them. These patterns target
+  # common credential formats and assignments, not ordinary words such as
+  # "secret" in documentation.
+  if [[ "$(git cat-file -t ":$path" 2>/dev/null || true)" == "blob" ]] &&
+     git show ":$path" | grep -aEiq -- \
+       '-----BEGIN ([A-Z]+ )?PRIVATE KEY-----|gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|npm_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{20,}|sk_(live|test)_[A-Za-z0-9]{16,}|sk-(proj|ant)-[A-Za-z0-9_-]{16,}|Authorization:[[:space:]]*Bearer[[:space:]]+[A-Za-z0-9._~+/=-]{20,}|(api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|private[_-]?key|password|passwd|secret)[[:space:]]*[:=][[:space:]]*[A-Za-z0-9_./+=:-]{16,}'; then
+    reject "$path (credential-like content)"
+  fi
+done < <(git diff --cached --name-only --diff-filter=ACMR -z)
+
+if (( blocked )); then
+  printf 'Commit aborted. Unstage the file(s) or remove the sensitive content.\n' >&2
+  exit 1
+fi

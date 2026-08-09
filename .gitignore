@@ -1,6 +1,15 @@
 # Credentials and private configuration
 agent/auth.json
 agent/mcp-cache.json
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*.json
+secrets*.json
 
 # Conversation history
 agent/sessions/
