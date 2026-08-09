@@ -1,6 +1,5 @@
 # Credentials and private configuration
 agent/auth.json
-mcp.json
 agent/mcp-cache.json
 
 # Conversation history
