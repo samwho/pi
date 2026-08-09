@@ -1,0 +1,24 @@
+#!/bin/bash
+set -euo pipefail
+
+wrapper_dir="$(cd "$(dirname "$0")" && pwd)"
+filtered_path=""
+old_ifs="$IFS"
+IFS=:
+for path_entry in $PATH; do
+  [[ "$path_entry" == "$wrapper_dir" ]] && continue
+  if [[ -n "$filtered_path" ]]; then
+    filtered_path+=:
+  fi
+  filtered_path+="$path_entry"
+done
+IFS="$old_ifs"
+export PATH="$filtered_path"
+
+unsafe_pi="$(command -v pi || true)"
+if [[ -z "$unsafe_pi" ]]; then
+  echo "Could not find the non-sandboxed pi executable." >&2
+  exit 1
+fi
+
+exec "$unsafe_pi" "$@"

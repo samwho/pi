@@ -1,0 +1,78 @@
+#!/bin/bash
+set -euo pipefail
+
+image="${PI_DOCKER_IMAGE:-pi-sandbox}"
+docker_dir="${PI_DOCKER_DIR:-$HOME/.pi/docker}"
+
+if ! docker image inspect "$image" >/dev/null 2>&1; then
+  echo "Building $image..." >&2
+  docker build --platform "${PI_DOCKER_PLATFORM:-linux/amd64}" \
+    -t "$image" -f "$docker_dir/Dockerfile" "$docker_dir" >&2
+fi
+
+project_dir="$(pwd -P)"
+project_key="$(printf '%s' "$project_dir" | shasum -a 256 | cut -c1-16)"
+sessions_volume="pi-agent-sessions-$project_key"
+
+mounts=(
+  --mount "type=bind,src=$PWD,dst=/workspace"
+  # Persistent sandbox state (credentials, extensions, caches, and package metadata).
+  --mount "type=volume,src=pi-agent-shared,dst=/home/pi/.pi/agent"
+  # Use the host's package configuration, but prevent sandboxed Pi from changing it.
+  --mount "type=bind,src=$HOME/.pi/agent/settings.json,dst=/home/pi/.pi/agent/settings.json,readonly"
+  # Host-managed global extensions are shared read-only with the sandbox.
+  --mount "type=bind,src=$HOME/.pi/agent/extensions,dst=/home/pi/.pi/agent/extensions,readonly"
+  # npm-installed packages are managed by the host pi and only readable in sandboxes.
+  --mount "type=bind,src=$HOME/.pi/agent/npm,dst=/home/pi/.pi/agent/npm,readonly"
+  # Global MCP server configuration is host-managed and read-only in sandboxes.
+  --mount "type=bind,src=$HOME/.pi/mcp.json,dst=/home/pi/.pi/mcp.json,readonly"
+  # pi-mcp-adapter reads its Pi-global config from the agent directory.
+  --mount "type=bind,src=$HOME/.pi/mcp.json,dst=/home/pi/.pi/agent/mcp.json,readonly"
+  # Keep conversation history isolated per host project directory.
+  --mount "type=volume,src=$sessions_volume,dst=/home/pi/.pi/agent/sessions"
+)
+
+# Make repository metadata readable but not writable. This preserves git status,
+# diff, and history while preventing commits, checkouts, rebases, and stashes.
+if [[ -e "$PWD/.git" ]]; then
+  mounts+=(--mount "type=bind,src=$PWD/.git,dst=/workspace/.git,readonly")
+fi
+
+platform="${PI_DOCKER_PLATFORM:-linux/amd64}"
+docker_args=(
+  run --rm -i --platform "$platform"
+  --cap-drop=ALL
+  --security-opt=no-new-privileges:true
+  --pids-limit "${PI_DOCKER_PIDS_LIMIT:-512}"
+  --memory "${PI_DOCKER_MEMORY:-4g}"
+  --cpus "${PI_DOCKER_CPUS:-4}"
+)
+if [[ -t 1 ]]; then
+  docker_args+=(-t)
+fi
+
+# Docker does not automatically forward terminal capability variables. Use a
+# standard terminfo entry while preserving the host's true-color/emulator hints.
+sandbox_term="${TERM:-xterm-256color}"
+if [[ "$sandbox_term" == *ghostty* ]]; then
+  sandbox_term="xterm-256color"
+fi
+terminal_env=(
+  -e "TERM=$sandbox_term"
+)
+if [[ -n "${COLORTERM:-}" ]]; then
+  terminal_env+=(-e "COLORTERM=$COLORTERM")
+elif [[ "${TERM:-}" == *ghostty* || "${TERM_PROGRAM:-}" == "ghostty" ]]; then
+  terminal_env+=(-e "COLORTERM=truecolor")
+fi
+if [[ -n "${TERM_PROGRAM:-}" ]]; then
+  terminal_env+=(-e "TERM_PROGRAM=$TERM_PROGRAM")
+elif [[ "${TERM:-}" == *ghostty* ]]; then
+  terminal_env+=(-e "TERM_PROGRAM=ghostty")
+fi
+
+exec docker "${docker_args[@]}" \
+  "${mounts[@]}" \
+  "${terminal_env[@]}" \
+  -e GIT_OPTIONAL_LOCKS=0 \
+  "$image" "$@"

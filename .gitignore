@@ -1,0 +1,15 @@
+# Credentials and private configuration
+agent/auth.json
+mcp.json
+agent/mcp-cache.json
+
+# Conversation history
+agent/sessions/
+
+# Generated state and dependencies
+agent/models-store.json
+agent/npm/node_modules/
+agent/git/
+
+# Local filesystem metadata
+.DS_Store
