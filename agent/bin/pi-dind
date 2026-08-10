@@ -1,0 +1,3 @@
+#!/bin/bash
+# Start Pi with the isolated, per-project rootless Docker daemon enabled.
+exec env PI_ENABLE_DIND=1 "$HOME/.pi/agent/bin/pi" "$@"

@@ -1,0 +1,11 @@
+#!/bin/bash
+set -euo pipefail
+
+image="${PI_DOCKER_IMAGE:-pi-sandbox}"
+pi_dir="${PI_CONFIG_DIR:-$HOME/.pi}"
+platform="${PI_DOCKER_PLATFORM:-linux/amd64}"
+
+exec docker build --platform "$platform" \
+  -t "$image" \
+  -f "$pi_dir/docker/Dockerfile" \
+  "$pi_dir"

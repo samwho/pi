@@ -1,20 +1,18 @@
-# The official Arch image is x86_64-only. The sandbox runs it under
-# emulation on Apple Silicon for consistency with the upstream image.
-FROM archlinux:latest
+# Official Arch Linux amd64 manifest, pinned rather than using a moving tag.
+# It is intentionally amd64: the official image does not publish ARM64.
+FROM archlinux@sha256:a674898d53cc63b1af4023a468ccddc25ed9d7aecc3996f16171838a57085999
 
-# Arch is rolling-release; upgrade the base system before installing anything
-# else so all packages come from the same current repository snapshot. Docker's
+# Keep the official Arch image's rolling-release update/install flow. Docker's
 # restricted build environment cannot use pacman's Landlock/alpm sandbox.
 RUN sed -i 's/^#DisableSandbox/DisableSandbox/' /etc/pacman.conf \
   && pacman -Syu --noconfirm \
   && pacman -S --noconfirm --needed \
-     bash base-devel ca-certificates chromium curl fd git neovim \
-     ripgrep rsync \
+     bash base-devel ca-certificates chromium curl docker docker-buildx fd git \
+     iproute2 iptables-nft jq make neovim ripgrep rootlesskit rsync shadow slirp4netns \
   && pacman -Scc --noconfirm
 
 # pi-skills' browser-start script currently uses Chrome's macOS path. Provide a
-# Linux-compatible headless shim at that path, including the flags required by
-# the capability-restricted container.
+# Linux-compatible headless shim at that path, including container-safe flags.
 RUN mkdir -p "/Applications/Google Chrome.app/Contents/MacOS" \
   && printf '%s\n' '#!/bin/sh' \
      'exec /usr/bin/chromium --headless=new --no-sandbox --disable-dev-shm-usage "$@"' \
@@ -22,14 +20,18 @@ RUN mkdir -p "/Applications/Google Chrome.app/Contents/MacOS" \
   && chmod 0755 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 
 RUN useradd --create-home --uid 1000 --shell /bin/bash pi \
-  && mkdir -p /home/pi/.pi/agent/sessions /workspace \
-  && chown -R pi:pi /home/pi /workspace
+  && printf 'pi:100000:65536\n' > /etc/subuid \
+  && printf 'pi:100000:65536\n' > /etc/subgid \
+  && mkdir -p /home/pi/.local/share/docker /home/pi/.pi/agent/sessions /home/pi/.pi/state \
+     /run/pi-docker /run/user/1000 /workspace \
+  && chown -R pi:pi /home/pi /run/pi-docker /run/user/1000 /workspace \
+  && chmod 4755 /usr/bin/newuidmap /usr/bin/newgidmap
 
 ENV HOME="/home/pi"
 ENV MISE_DATA_DIR="/home/pi/.local/share/mise"
-# Trust mise configs in the mounted project without prompting in the sandbox.
 ENV MISE_TRUSTED_CONFIG_PATHS="/workspace"
-ENV PATH="/home/pi/.local/bin:/home/pi/.local/share/mise/shims:${PATH}"
+ENV PATH="/home/pi/.local/share/mise/installs/node/latest/bin:/home/pi/.local/bin:/home/pi/.local/share/mise/shims:${PATH}"
+ENV DOCKER_HOST="unix:///run/pi-docker/docker.sock"
 
 USER pi
 
@@ -48,5 +50,18 @@ RUN curl --proto '=https' --tlsv1.2 -fsSL https://mise.run | sh \
   && chromium --version \
   && npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 
+USER root
+
+COPY --chown=pi:pi agent/ /home/pi/.pi/agent/
+COPY --chown=pi:pi agent/mcp.json /home/pi/.pi/agent/mcp.json
+COPY --chmod=0755 docker/entrypoint.sh /usr/local/bin/pi-entrypoint
+COPY --chmod=0755 docker/dockerd-entrypoint.sh /usr/local/bin/pi-dockerd-entrypoint
+COPY --chmod=0755 docker/network-lockdown.sh /usr/local/bin/pi-network-lockdown
+
+RUN test ! -e /home/pi/.pi/agent/auth.json \
+  && test ! -e /home/pi/.pi/agent/models-store.json \
+  && ln -s /home/pi/.pi/state/auth.json /home/pi/.pi/agent/auth.json \
+  && ln -s /home/pi/.pi/state/models-store.json /home/pi/.pi/agent/models-store.json
+
 WORKDIR /workspace
-ENTRYPOINT ["mise", "exec", "-q", "node@latest", "--", "pi"]
+ENTRYPOINT ["/usr/local/bin/pi-entrypoint"]
