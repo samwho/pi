@@ -71,7 +71,7 @@ elif [[ "${TERM:-}" == *ghostty* ]]; then
   terminal_env+=(-e "TERM_PROGRAM=ghostty")
 fi
 
-exec docker "${docker_args[@]}" \
+exec mise exec -q node@latest -- docker "${docker_args[@]}" \
   "${mounts[@]}" \
   "${terminal_env[@]}" \
   -e GIT_OPTIONAL_LOCKS=0 \

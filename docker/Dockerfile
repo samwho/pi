@@ -49,4 +49,4 @@ RUN curl --proto '=https' --tlsv1.2 -fsSL https://mise.run | sh \
   && npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 
 WORKDIR /workspace
-ENTRYPOINT ["pi"]
+ENTRYPOINT ["mise", "exec", "-q", "node@latest", "--", "pi"]
