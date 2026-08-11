@@ -83,8 +83,7 @@ class NpmLatestVersions(FactBase):
         for package in packages:
             quoted = shlex.quote(package)
             lines.append(
-                f"printf '%s\\t%s\\n' {quoted} "
-                f"\"$({NODE_BIN}/npm view {quoted}@latest version)\""
+                f"printf '%s\\t%s\\n' {quoted} \"$({NODE_BIN}/npm view {quoted}@latest version)\""
             )
         return _as_pi(f"PATH={NODE_BIN}:/usr/bin; export PATH; " + "; ".join(lines))
 

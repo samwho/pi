@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Render PyInfra's JSON dry-run plan as a polished terminal diff."""
 
 import json
@@ -49,11 +48,7 @@ def main() -> int:
     changed_operations = [operation for operation in plan if operation["hosts_with_change"]]
     diffs = file_diffs(log)
     hosts = sorted(
-        {
-            host
-            for operation in changed_operations
-            for host in operation["hosts_with_change"]
-        }
+        {host for operation in changed_operations for host in operation["hosts_with_change"]}
     )
     target = ", ".join(hosts) if hosts else "template"
 
@@ -70,7 +65,8 @@ def main() -> int:
     if not changed_operations:
         console.print(
             Panel.fit(
-                "[bold green]✓ No changes[/bold green]\n[dim]The template matches the deployment.[/dim]",
+                "[bold green]✓ No changes[/bold green]\n"
+                "[dim]The template matches the deployment.[/dim]",
                 border_style="green",
                 padding=(0, 3),
             ),

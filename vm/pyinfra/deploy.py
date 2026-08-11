@@ -150,7 +150,11 @@ for source, destination in host.loop(managed_scripts.items()):
 
 files.put(
     name="Install the headless Chromium compatibility launcher",
-    src=StringIO("#!/bin/sh\nexec /usr/bin/chromium --headless=new --no-sandbox --disable-dev-shm-usage \"$@\"\n"),
+    src=StringIO(
+        "#!/bin/sh\n"
+        "exec /usr/bin/chromium --headless=new --no-sandbox "
+        '--disable-dev-shm-usage "$@"\n'
+    ),
     dest="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     user="root",
     group="root",

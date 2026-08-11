@@ -36,7 +36,16 @@ resolve current upstream versions and only install tools or npm packages when
 the declared `latest` version has changed. The mise binary itself is a pinned,
 checksummed `files.download`, rather than a piped installer script. The PyInfra
 Python environment is locked by uv; run `uv sync` after cloning to give editors
-and command-line tools the same dependency environment. The remaining
+and command-line tools the same dependency environment. Ruff owns formatting
+and linting, while ty provides project type checking:
+
+```bash
+uv run ruff format --check vm/pyinfra
+uv run ruff check vm/pyinfra
+uv run ty check
+```
+
+The remaining
 shell code is limited to OrbStack lifecycle orchestration and clone-time policy
 that depends on invocation-specific mounts and the allowed host IP; those
 states do not exist while PyInfra is converging the stopped template.

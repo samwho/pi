@@ -6,3 +6,24 @@ dependencies = [
     "pyinfra==3.10.0",
     "rich>=14,<15",
 ]
+
+[dependency-groups]
+dev = [
+    "ruff==0.16.2",
+    "ty==0.0.70",
+]
+
+[tool.ruff]
+line-length = 100
+src = ["vm/pyinfra"]
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "C4", "PIE", "PERF", "RUF", "SIM"]
+
+[tool.ty.environment]
+python = ".venv"
+root = ["vm/pyinfra"]
+
+[tool.ty.src]
+include = ["vm/pyinfra"]

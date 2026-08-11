@@ -57,7 +57,9 @@ def mise_tools(tools: list[str]):
     for request in tools:
         tool, requested_version = _split_request(request)
         entry = current.get(tool, {})
-        resolved_version = latest.get(request) if requested_version == "latest" else requested_version
+        resolved_version = (
+            latest.get(request) if requested_version == "latest" else requested_version
+        )
         if (
             not entry.get("installed")
             or entry.get("requested_version") != requested_version
@@ -86,7 +88,9 @@ def mise_npm_packages(packages: list[str]):
 
     for request in packages:
         package, requested_version = _split_request(request)
-        resolved_version = latest.get(package) if requested_version == "latest" else requested_version
+        resolved_version = (
+            latest.get(package) if requested_version == "latest" else requested_version
+        )
         if not resolved_version or current.get(package) != resolved_version:
             changed.append(request)
 
