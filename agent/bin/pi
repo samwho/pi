@@ -23,16 +23,12 @@ if [[ ! -d "$host_config" ]]; then
 fi
 
 state_root="${PI_VM_STATE_ROOT:-$HOME/.local/share/pi-vm}"
-sessions_dir="$state_root/sessions/$profile/$project_key"
-dependencies_dir="$state_root/dependencies/$profile/$project_key"
-pnpm_store_dir="$state_root/pnpm-store"
 runtime_root="$state_root/runtime"
-mkdir -p "$sessions_dir" "$dependencies_dir" "$pnpm_store_dir" "$runtime_root"
-chmod 0700 "$state_root" "$state_root/sessions" "$state_root/sessions/$profile" \
-  "$sessions_dir" "$state_root/dependencies" "$state_root/dependencies/$profile" \
-  "$dependencies_dir" "$pnpm_store_dir" "$runtime_root" 2>/dev/null || true
-launch_dir="$(mktemp -d "$runtime_root/launch.XXXXXX")"
-chmod 0700 "$launch_dir"
+profile_key="$(printf '%s' "$profile" | shasum -a 256 | cut -c1-8)"
+machine="pi-${project_key}-${profile_key}"
+launch_dir="$runtime_root/launch-$machine"
+mkdir -p "$runtime_root" "$launch_dir"
+chmod 0700 "$state_root" "$runtime_root" "$launch_dir" 2>/dev/null || true
 
 # The runtime launch directory is mounted so the guest can verify that this
 # invocation has supplied its required runtime mounts. Record the host's
@@ -60,27 +56,32 @@ if [[ -z "$host_ips" ]]; then
 fi
 printf '%s\n' "$host_ips" >"$launch_dir/host-ips"
 
-machine="pi-${project_key}-$$-$(printf '%04x' "$((RANDOM & 65535))")"
 cleanup() {
-  orb delete -f "$machine" >/dev/null 2>&1 || true
-  rm -rf "$launch_dir"
+  orb stop "$machine" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-# Everything machine-wide is already provisioned in the persistent template.
-# Runtime work is limited to cloning and attaching the paths whose values are
-# invocation-specific. The root-owned boot service prepares their policy.
-orb clone "$template" "$machine" >/dev/null
-for path in "$project_dir" "$sessions_dir" "$dependencies_dir" "$pnpm_store_dir" "$host_config" "$launch_dir"; do
+if orb info "$machine" >/dev/null 2>&1; then
+  if orbctl list --running --quiet | grep -Fxq "$machine"; then
+    echo "$machine is already running for this directory and profile." >&2
+    exit 1
+  fi
+else
+  # The VM is persistent per project/profile. Its sessions, dependency tree,
+  # package store, and other mutable state live on its disk, not on the host.
+  orb clone "$template" "$machine" >/dev/null
+fi
+
+for path in "$project_dir" "$host_config" "$launch_dir"; do
   if [[ "$path" == *','* ]]; then
     echo "OrbStack mount paths containing commas are not supported: $path" >&2
     exit 2
   fi
 done
 orb config set "machine.$machine.mounts" \
-  "$project_dir:/workspace,$sessions_dir:/home/pi/.pi/agent/sessions,$dependencies_dir:/mnt/pi-deps,$pnpm_store_dir:/mnt/pi-pnpm-store,$host_config:/mnt/pi-host,$launch_dir:/mnt/pi-launch"
+  "$project_dir:/workspace,$host_config:/mnt/pi-host,$launch_dir:/mnt/pi-launch"
 orb start "$machine" >/dev/null
 
 sandbox_term="${TERM:-xterm-256color}"

@@ -1,0 +1,25 @@
+#!/bin/bash
+set -euo pipefail
+
+project_dir="$(pwd -P)"
+project_key="$(printf '%s' "$project_dir" | shasum -a 256 | cut -c1-12)"
+profile="${PI_VM_PROFILE:-default}"
+if [[ ! "$profile" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+  echo "PI_VM_PROFILE may contain only letters, digits, dot, underscore, and dash." >&2
+  exit 2
+fi
+
+profile_key="$(printf '%s' "$profile" | shasum -a 256 | cut -c1-8)"
+machine="pi-${project_key}-${profile_key}"
+state_root="${PI_VM_STATE_ROOT:-$HOME/.local/share/pi-vm}"
+launch_dir="$state_root/runtime/launch-$machine"
+
+if ! orb info "$machine" >/dev/null 2>&1; then
+  echo "No Pi VM exists for $project_dir (profile: $profile)."
+  exit 0
+fi
+
+echo "Deleting $machine..."
+orb delete -f "$machine" >/dev/null
+rm -rf "$launch_dir"
+echo "Deleted $machine."

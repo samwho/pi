@@ -3,8 +3,8 @@
 This repository launches Pi in a fresh, isolated OrbStack Arch Linux ARM64
 machine. The current project and a policy-controlled projection of the host Pi
 configuration are mounted from macOS, Git metadata is remounted read-only,
-sessions and project dependency state are kept in separate profile/project
-directories, and Pi has rootless Docker and headless Chromium.
+and each project/profile gets a persistent VM with its own sessions and project
+dependency state. Pi has rootless Docker and headless Chromium.
 
 ## Quick start
 
@@ -15,8 +15,11 @@ directories, and Pi has rootless Docker and headless Chromium.
 # Preview the PyInfra changes without modifying the template.
 ~/.pi/agent/bin/pi-diff
 
-# From any project: clone the template, run Pi, then delete the clone on exit.
+# From any project: start/reuse its VM, run Pi, then stop the VM on exit.
 ~/.pi/agent/bin/pi
+
+# Delete the persistent VM and all state inside it for the current project.
+~/.pi/agent/bin/pi-delete
 ```
 
 `pi-diff` uses Rich to render only operations that would change and includes
@@ -53,7 +56,7 @@ PyInfra is converging the stopped template.
 Useful overrides:
 
 ```bash
-PI_VM_PROFILE=work pi                 # separate persistent session namespace
+PI_VM_PROFILE=work pi                 # separate persistent VM namespace
 PI_VM_CPUS=6 PI_VM_MEMORY=8G pi-update
 ```
 
@@ -63,40 +66,42 @@ PI_VM_CPUS=6 PI_VM_MEMORY=8G pi-update
 
 ```text
 stopped pi-template (Arch ARM64, provisioned)
-        │ orb clone (copy-on-demand)
+        │ clone once per project/profile
         ▼
-fresh isolated machine
+persistent isolated project VM
   ├─ project mounted read/write at /workspace
   ├─ /workspace/.git covered by a read-only bind mount
-  ├─ Linux-native project dependencies overlaid at /workspace/node_modules
-  ├─ profile/project sessions mounted at ~/.pi/agent/sessions
+  ├─ Linux-native project dependencies in the VM disk
+  ├─ project/profile sessions in the VM disk
   ├─ root-owned egress firewall
   ├─ Pi runs as unprivileged user `pi` without sudo
   ├─ rootless Docker daemon
   └─ headless Chromium and Chrome DevTools MCP
         │ Pi exits
         ▼
-clone deleted; template and mounted sessions remain
+same VM stopped; state retained
+        │ pi-delete
+        ▼
+VM and its state deleted
 ```
 
-OrbStack clones are copy-on-demand and start stopped. The launcher only clones,
-attaches invocation-specific mounts, starts the machine, and executes Pi. These
-host paths are selectively mounted:
+OrbStack clones are copy-on-demand and start stopped. The launcher clones a
+project/profile VM the first time, then reuses it on later starts. The only host
+paths mounted into the persistent VM are:
 
 - the current project at `/workspace`;
-- `$PI_VM_STATE_ROOT/sessions/<profile>/<project hash>` at Pi's session path;
-- `$PI_VM_STATE_ROOT/dependencies/<profile>/<project hash>` as the project's
-  Linux-native `node_modules` state;
-- `$PI_VM_STATE_ROOT/pnpm-store` as the shared pnpm package store;
-- the host Pi agent directory at a temporary, hidden projection source;
-- a temporary directory used for invocation-specific runtime state.
+- the host Pi agent directory at `/mnt/pi-host` for live configuration
+  projection;
+- a small runtime directory at `/mnt/pi-launch` containing the per-start host
+  address allowlist.
 
-The root-owned boot service also overlays JavaScript projects' host
-`node_modules` with the per-project Linux-native dependency directory. Before Pi
-starts, the guest activates the repository's mise environment and synchronizes
-dependencies from conventional package-manager lockfiles. Changes to manifests,
-lockfiles, or toolchain files invalidate the dependency stamp; no repository
-name or dependency version is encoded in the VM.
+Sessions, Linux-native `node_modules`, the pnpm package store, and other mutable
+runtime state remain on the VM disk. The root-owned boot service overlays
+JavaScript projects' host `node_modules` with `/mnt/pi-deps` inside that disk.
+Before Pi starts, the guest activates the repository's mise environment and
+synchronizes dependencies from conventional package-manager lockfiles. Changes
+to manifests, lockfiles, or toolchain files invalidate the dependency stamp; no
+repository name or dependency version is encoded in the VM.
 
 A root-owned boot service projects each top-level host Pi configuration entry
 except `sessions/` into `~/.pi/agent`. `settings.json`, `auth.json`, OAuth/model
@@ -148,7 +153,8 @@ deliberately allowed credentials in the host Pi configuration.
 
 | Path | Responsibility |
 | --- | --- |
-| `agent/bin/pi` | Clone lifecycle, project dependency state, selective mounts, and Pi execution. |
+| `agent/bin/pi` | Persistent VM lifecycle, selective mounts, and Pi execution. |
+| `agent/bin/pi-delete` | Deletes the persistent VM and its in-VM state for the current project/profile. |
 | `agent/bin/pi-update` | Creates the template if absent and runs incremental PyInfra convergence. |
 | `agent/bin/pi-diff` | Starts the template if necessary and previews PyInfra operations and file diffs. |
 | `pyproject.toml`, `uv.lock` | Locked Python/PyInfra project used by updates and editor tooling. |
