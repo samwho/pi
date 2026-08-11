@@ -2,6 +2,13 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
+type StatusColor = "success" | "warning" | "error";
+
+// Rates in Pi's model catalogue are USD per million tokens. The highest of
+// input/output is used so an expensive output price is not hidden by cheap input.
+const CHEAP_PRICE = 5;
+const EXPENSIVE_PRICE = 20;
+
 function sessionCost(ctx: ExtensionContext): number {
   let cost = 0;
 
@@ -18,22 +25,83 @@ function sessionCost(ctx: ExtensionContext): number {
   return cost;
 }
 
-export default function (pi: ExtensionAPI) {
-  pi.on("session_start", (_event, ctx) => {
-    ctx.ui.setFooter((_tui, theme, footerData) => ({
-      render(width: number): string[] {
-        const context = ctx.getContextUsage();
-        const contextText = context?.percent == null ? "?" : `${context.percent.toFixed(1)}%`;
-        const left = `${contextText}  $${sessionCost(ctx).toFixed(3)}`;
-        const modelText = ctx.model?.id ?? "no model";
-        const reasoningText = ctx.model?.reasoning ? ctx.thinkingLevel ?? "off" : "off";
-        const fastText = footerData.getExtensionStatuses().has("pi-gpt-fast-mode") ? " [FAST]" : "";
-        const right = `${modelText} (${reasoningText})${fastText}`;
-        const padding = " ".repeat(Math.max(2, width - visibleWidth(left) - visibleWidth(right)));
+function priceColor(input: number | undefined, output: number | undefined): StatusColor {
+  const rates = [input, output].filter((rate): rate is number => typeof rate === "number" && Number.isFinite(rate));
+  if (rates.length === 0) return "warning";
 
-        return [truncateToWidth(theme.fg("dim", left + padding + right), width)];
-      },
-      invalidate() {},
-    }));
+  const highestRate = Math.max(...rates);
+  if (highestRate <= CHEAP_PRICE) return "success";
+  if (highestRate <= EXPENSIVE_PRICE) return "warning";
+  return "error";
+}
+
+function thinkingColor(level: string): StatusColor {
+  if (level === "off" || level === "minimal" || level === "low") return "success";
+  if (level === "medium") return "warning";
+  return "error";
+}
+
+function contextColor(percent: number | null | undefined): StatusColor | undefined {
+  if (percent == null || !Number.isFinite(percent)) return undefined;
+  if (percent >= 90) return "error";
+  if (percent >= 70) return "warning";
+  return "success";
+}
+
+function formatRate(rate: number | undefined): string {
+  if (typeof rate !== "number" || !Number.isFinite(rate)) return "?";
+  return rate < 10 ? rate.toFixed(2) : rate.toFixed(0);
+}
+
+export default function (pi: ExtensionAPI) {
+  let requestFooterRender: (() => void) | undefined;
+
+  pi.on("session_start", (_event, ctx) => {
+    ctx.ui.setFooter((tui, theme, footerData) => {
+      requestFooterRender = () => tui.requestRender();
+      const unsubscribe = footerData.onBranchChange(() => tui.requestRender());
+
+      return {
+        render(width: number): string[] {
+          const context = ctx.getContextUsage();
+          const contextPercent = context?.percent;
+          const contextLabel = contextPercent == null ? "?" : `${contextPercent.toFixed(1)}%`;
+          const contextStatusColor = contextColor(contextPercent);
+          const contextText = contextStatusColor
+            ? theme.fg(contextStatusColor, contextLabel)
+            : theme.fg("dim", contextLabel);
+          const left = `${contextText} ${theme.fg("dim", `$${sessionCost(ctx).toFixed(3)}`)}`;
+
+          const model = ctx.model;
+          const modelLabel = model?.id ?? "no model";
+          const modelText = theme.fg(
+            model ? priceColor(model.cost?.input, model.cost?.output) : "dim",
+            modelLabel,
+          );
+          const thinkingLevel = model?.reasoning ? ctx.thinkingLevel ?? "off" : "off";
+          const thinkingText = theme.fg(thinkingColor(thinkingLevel), thinkingLevel);
+          const ratesText = model
+            ? theme.fg("dim", `$${formatRate(model.cost?.input)}/$${formatRate(model.cost?.output)}`)
+            : "";
+          const fastText = footerData.getExtensionStatuses().has("pi-gpt-fast-mode")
+            ? theme.fg("warning", "[FAST]")
+            : "";
+          const right = [modelText, thinkingText, ratesText, fastText].filter(Boolean).join(" ");
+          const padding = " ".repeat(Math.max(2, width - visibleWidth(left) - visibleWidth(right)));
+
+          return [truncateToWidth(left + padding + right, width)];
+        },
+        invalidate() {},
+        dispose() {
+          unsubscribe();
+          requestFooterRender = undefined;
+        },
+      };
+    });
   });
+
+  // These changes can happen without a message being added to the branch.
+  pi.on("model_select", () => requestFooterRender?.());
+  pi.on("thinking_level_select", () => requestFooterRender?.());
+  pi.on("turn_end", () => requestFooterRender?.());
 }
