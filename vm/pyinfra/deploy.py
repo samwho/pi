@@ -88,8 +88,16 @@ files.put(
     dest="/etc/subgid",
     mode="0644",
 )
-files.file(path="/usr/bin/newuidmap", mode="4755")
-files.file(path="/usr/bin/newgidmap", mode="4755")
+files.file(
+    name="Configure newuidmap permissions",
+    path="/usr/bin/newuidmap",
+    mode="4755",
+)
+files.file(
+    name="Configure newgidmap permissions",
+    path="/usr/bin/newgidmap",
+    mode="4755",
+)
 files.file(
     name="Remove OrbStack passwordless sudo policy",
     path="/etc/sudoers.d/orbstack",
@@ -117,7 +125,13 @@ for path, owner, mode in host.loop(
         ("/workspace", "root", "0755"),
     ],
 ):
-    files.directory(path=path, user=owner, group=owner, mode=mode)
+    files.directory(
+        name=f"Configure {path}",
+        path=path,
+        user=owner,
+        group=owner,
+        mode=mode,
+    )
 
 managed_scripts = {
     "network-lockdown.sh": "/usr/local/bin/pi-network-lockdown",
@@ -126,6 +140,7 @@ managed_scripts = {
 }
 for source, destination in host.loop(managed_scripts.items()):
     files.put(
+        name=f"Install {Path(destination).name}",
         src=str(VM_DIR / source),
         dest=destination,
         user="root",

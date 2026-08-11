@@ -67,6 +67,7 @@ orb -m "$template" -u pi bash -lc '
   test "$(uname -m)" = aarch64
   ! command -v sudo >/dev/null
   command -v chromium >/dev/null
+  export NODE_NO_WARNINGS=1
   /home/pi/.local/share/mise/installs/node/latest/bin/chrome-devtools-mcp --version >/dev/null
   /home/pi/.local/share/mise/installs/node/latest/bin/pi --version
   export DOCKER_HOST="unix:///run/user/$(id -u)/docker.sock"
@@ -74,7 +75,7 @@ orb -m "$template" -u pi bash -lc '
     docker info >/dev/null 2>&1 && break
     sleep 0.1
   done
-  docker info >/dev/null
+  docker info >/dev/null 2>&1
   docker run --rm alpine:latest true
 '
 
