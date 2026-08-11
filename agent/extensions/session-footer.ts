@@ -1,4 +1,5 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
+import { FAST_COST_MULTIPLIER } from "./fast-mode.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
@@ -53,6 +54,11 @@ function formatRate(rate: number | undefined): string {
   return rate < 10 ? rate.toFixed(2) : rate.toFixed(0);
 }
 
+function effectiveRate(rate: number | undefined, fastEnabled: boolean): number | undefined {
+  if (!fastEnabled || typeof rate !== "number" || !Number.isFinite(rate)) return rate;
+  return rate * FAST_COST_MULTIPLIER;
+}
+
 export default function (pi: ExtensionAPI) {
   let requestFooterRender: (() => void) | undefined;
 
@@ -73,20 +79,21 @@ export default function (pi: ExtensionAPI) {
           const left = `${contextText} ${theme.fg("dim", `$${sessionCost(ctx).toFixed(3)}`)}`;
 
           const model = ctx.model;
+          const fastEnabled = footerData.getExtensionStatuses().has("pi-gpt-fast-mode");
+          const inputRate = effectiveRate(model?.cost?.input, fastEnabled);
+          const outputRate = effectiveRate(model?.cost?.output, fastEnabled);
           const modelLabel = model?.id ?? "no model";
           const modelText = theme.fg(
-            model ? priceColor(model.cost?.input, model.cost?.output) : "dim",
+            model ? priceColor(inputRate, outputRate) : "dim",
             modelLabel,
           );
           const thinkingLevel = model?.reasoning ? ctx.thinkingLevel ?? "off" : "off";
           const thinkingText = theme.fg(thinkingColor(thinkingLevel), thinkingLevel);
           const ratesText = model
-            ? theme.fg("dim", `$${formatRate(model.cost?.input)}/$${formatRate(model.cost?.output)}`)
+            ? theme.fg("dim", `$${formatRate(inputRate)}/$${formatRate(outputRate)}`)
             : "";
-          const fastText = footerData.getExtensionStatuses().has("pi-gpt-fast-mode")
-            ? theme.fg("warning", "[FAST]")
-            : "";
-          const right = [modelText, thinkingText, ratesText, fastText].filter(Boolean).join(" ");
+          const fastText = fastEnabled ? theme.fg("warning", "fast") : "";
+          const right = [modelText, thinkingText, fastText, ratesText].filter(Boolean).join(" ");
           const padding = " ".repeat(Math.max(2, width - visibleWidth(left) - visibleWidth(right)));
 
           return [truncateToWidth(left + padding + right, width)];
