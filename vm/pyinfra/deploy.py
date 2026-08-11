@@ -115,10 +115,13 @@ for path, owner, mode in host.loop(
         # Rootless dockerd adds group execute while running.
         ("/home/pi/.local/share/docker", "pi", "0710"),
         ("/home/pi/.local/state", "pi", "0700"),
+        ("/home/pi/.cache/pnpm", "pi", "0700"),
         ("/home/pi/.pi/agent", "pi", "0700"),
         ("/home/pi/.pi/agent/sessions", "pi", "0700"),
+        ("/mnt/pi-deps", "root", "0700"),
         ("/mnt/pi-host", "root", "0700"),
         ("/mnt/pi-launch", "root", "0700"),
+        ("/mnt/pi-pnpm-store", "root", "0700"),
         ("/run/containerd", "pi", "0700"),
         ("/run/docker", "pi", "0700"),
         ("/var/lib/systemd/linger", "root", "0755"),
@@ -136,6 +139,7 @@ for path, owner, mode in host.loop(
 managed_scripts = {
     "network-lockdown.sh": "/usr/local/bin/pi-network-lockdown",
     "prepare-runtime.sh": "/usr/local/bin/pi-prepare-runtime",
+    "project-dependencies.sh": "/usr/local/bin/pi-project-dependencies",
     "guest-entrypoint.sh": "/usr/local/bin/pi-guest",
 }
 for source, destination in host.loop(managed_scripts.items()):
@@ -249,6 +253,7 @@ mise_tools(
         "rust@latest",
         "uv@latest",
         "python@latest",
+        "npm:pnpm@latest",
         "npm:@biomejs/biome@latest",
     ],
 )

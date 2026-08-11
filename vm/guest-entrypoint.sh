@@ -32,4 +32,13 @@ if ! docker info >/dev/null 2>&1; then
   exit 1
 fi
 
+# Activate project-local mise tools so commands such as `pnpm` are available
+# without requiring a shell rc file. The dependency preparer uses the
+# repository's own package manager and lockfile, not repository-specific VM
+# configuration, and keeps native modules on the VM's Linux architecture.
+cd /workspace
+eval "$('/home/pi/.local/bin/mise' activate bash)"
+export pnpm_config_store_dir=/home/pi/.cache/pnpm/store
+/usr/local/bin/pi-project-dependencies
+
 exec /home/pi/.local/share/mise/installs/node/latest/bin/pi "$@"

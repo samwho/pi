@@ -3,8 +3,8 @@
 This repository launches Pi in a fresh, isolated OrbStack Arch Linux ARM64
 machine. The current project and a policy-controlled projection of the host Pi
 configuration are mounted from macOS, Git metadata is remounted read-only,
-sessions are kept in a separate profile/project directory, and Pi has rootless
-Docker and headless Chromium.
+sessions and project dependency state are kept in separate profile/project
+directories, and Pi has rootless Docker and headless Chromium.
 
 ## Quick start
 
@@ -47,14 +47,13 @@ uv run ty check
 
 The remaining
 shell code is limited to OrbStack lifecycle orchestration and clone-time policy
-that depends on invocation-specific mounts and the allowed host IP; those
-states do not exist while PyInfra is converging the stopped template.
+that depends on invocation-specific mounts; those states do not exist while
+PyInfra is converging the stopped template.
 
 Useful overrides:
 
 ```bash
 PI_VM_PROFILE=work pi                 # separate persistent session namespace
-PI_VM_HOST_IP=192.168.1.20 pi         # explicit allowed macOS address
 PI_VM_CPUS=6 PI_VM_MEMORY=8G pi-update
 ```
 
@@ -69,6 +68,7 @@ stopped pi-template (Arch ARM64, provisioned)
 fresh isolated machine
   ├─ project mounted read/write at /workspace
   ├─ /workspace/.git covered by a read-only bind mount
+  ├─ Linux-native project dependencies overlaid at /workspace/node_modules
   ├─ profile/project sessions mounted at ~/.pi/agent/sessions
   ├─ root-owned egress firewall
   ├─ Pi runs as unprivileged user `pi` without sudo
@@ -85,8 +85,18 @@ host paths are selectively mounted:
 
 - the current project at `/workspace`;
 - `$PI_VM_STATE_ROOT/sessions/<profile>/<project hash>` at Pi's session path;
+- `$PI_VM_STATE_ROOT/dependencies/<profile>/<project hash>` as the project's
+  Linux-native `node_modules` state;
+- `$PI_VM_STATE_ROOT/pnpm-store` as the shared pnpm package store;
 - the host Pi agent directory at a temporary, hidden projection source;
-- a temporary directory containing the one allowed host IP.
+- a temporary directory used for invocation-specific runtime state.
+
+The root-owned boot service also overlays JavaScript projects' host
+`node_modules` with the per-project Linux-native dependency directory. Before Pi
+starts, the guest activates the repository's mise environment and synchronizes
+dependencies from conventional package-manager lockfiles. Changes to manifests,
+lockfiles, or toolchain files invalidate the dependency stamp; no repository
+name or dependency version is encoded in the VM.
 
 A root-owned boot service projects each top-level host Pi configuration entry
 except `sessions/` into `~/.pi/agent`. `settings.json`, `auth.json`, OAuth/model
@@ -104,20 +114,20 @@ are not shared.
 ## Network policy
 
 The machine is created with OrbStack's `--isolated` mode, but deliberately not
-`--isolate-network`: OrbStack's latter option also blocks host IPs, while Pi
-needs one explicit macOS address.
+`--isolate-network`: OrbStack's latter option also blocks access to the local
+LAN, which Pi needs for development services.
 
 A root-owned firewall permits loopback, configured DNS, public IPv4 Internet,
-and exactly `PI_VM_HOST_IP`. It rejects private IPv4, carrier-grade NAT,
-link-local, OrbStack's machine network, multicast, and reserved destinations.
-IPv6 egress is rejected entirely because globally addressed LAN devices cannot
-be distinguished from public IPv6 destinations by prefix. Rootless Docker
-traffic exits through an unprivileged RootlessKit process and remains subject
-to this outer policy.
+and only the exact non-loopback IPv4 addresses assigned to the host machine for
+that clone. It rejects every other private IPv4 address, including other devices
+on the host's local subnet, plus carrier-grade NAT, link-local, OrbStack's
+machine network, multicast, and reserved destinations. IPv6 egress is rejected
+entirely because globally addressed LAN devices cannot be distinguished from
+public IPv6 destinations by prefix. Rootless Docker traffic exits through an
+unprivileged RootlessKit process and remains subject to this outer policy.
 
-The launcher derives the host address from macOS's default interface unless
-`PI_VM_HOST_IP` is set. Prefer the explicit setting when VPN routing makes the
-default ambiguous.
+The launcher derives the address list from the host's interfaces and passes it
+through the root-owned runtime mount as exact `/32` exceptions.
 
 ## Security model
 
@@ -138,7 +148,7 @@ deliberately allowed credentials in the host Pi configuration.
 
 | Path | Responsibility |
 | --- | --- |
-| `agent/bin/pi` | Clone lifecycle, selective mounts, host-IP policy, and Pi execution. |
+| `agent/bin/pi` | Clone lifecycle, project dependency state, selective mounts, and Pi execution. |
 | `agent/bin/pi-update` | Creates the template if absent and runs incremental PyInfra convergence. |
 | `agent/bin/pi-diff` | Starts the template if necessary and previews PyInfra operations and file diffs. |
 | `pyproject.toml`, `uv.lock` | Locked Python/PyInfra project used by updates and editor tooling. |
@@ -146,8 +156,9 @@ deliberately allowed credentials in the host Pi configuration.
 | `vm/pyinfra/deploy.py` | Declarative packages, users, files, services, and tool state. |
 | `vm/pyinfra/facts.py` | Facts for installed and current upstream mise/npm versions. |
 | `vm/pyinfra/operations.py` | Declarative mise tool and mise-scoped npm operations. |
-| `vm/prepare-runtime.sh` | Projects live Pi config, protects Git metadata, and applies network policy. |
+| `vm/prepare-runtime.sh` | Projects live Pi config, protects Git metadata, overlays native dependencies, and applies network policy. |
+| `vm/project-dependencies.sh` | Detects project package-manager inputs and installs Linux-native dependencies from the repository's own lockfiles. |
 | `vm/network-lockdown.sh` | Root-owned runtime egress filtering. |
 | `vm/pi-rootless-docker.service` | Declarative rootless Docker process configuration. |
-| `vm/guest-entrypoint.sh` | Waits for runtime policy and Docker, then starts Pi in `/workspace`. |
+| `vm/guest-entrypoint.sh` | Activates project tools, synchronizes dependencies, waits for runtime policy and Docker, then starts Pi in `/workspace`. |
 | `agent/mcp.json` | Headless Chromium MCP configuration. |

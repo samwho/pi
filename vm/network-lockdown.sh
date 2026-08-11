@@ -3,7 +3,8 @@ set -euo pipefail
 
 # Enforce this policy as root in the OrbStack machine, outside the unprivileged
 # agent and its rootless Docker daemon. Public IPv4 and DNS remain available;
-# local/private networks are blocked except for the explicitly configured Mac IP.
+# local/private networks are blocked except for exact IPv4 addresses assigned to
+# the host machine for this clone.
 ipv4_blocked_ranges=(
   0.0.0.0/8
   10.0.0.0/8
@@ -32,12 +33,16 @@ ensure_jump "$iptables_bin" PI_SANDBOX
 "$iptables_bin" -w -A PI_SANDBOX -o lo -j ACCEPT
 "$iptables_bin" -w -A PI_SANDBOX -d 127.0.0.0/8 -j ACCEPT
 
-# The host launcher mounts exactly one validated address for this clone.
-if [[ -r /mnt/pi-launch/host-ip ]]; then
-  host_ip="$(tr -d '[:space:]' </mnt/pi-launch/host-ip)"
-  if [[ "$host_ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
-    "$iptables_bin" -w -A PI_SANDBOX -d "$host_ip"/32 -j ACCEPT
-  fi
+# The host launcher mounts a validated list of the host's non-loopback IPv4
+# addresses for this clone. Permit those exact /32 addresses only; the private
+# network reject rules below still block every other device on those networks.
+if [[ -r /mnt/pi-launch/host-ips ]]; then
+  while read -r host_ip; do
+    [[ -z "$host_ip" ]] && continue
+    if [[ "$host_ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+      "$iptables_bin" -w -A PI_SANDBOX -d "$host_ip"/32 -j ACCEPT
+    fi
+  done </mnt/pi-launch/host-ips
 fi
 
 # OrbStack's resolver is commonly in its 198.18.0.0/15 machine network. Permit

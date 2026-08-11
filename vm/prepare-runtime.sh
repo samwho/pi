@@ -9,10 +9,27 @@ ready_file=/run/pi-sandbox-ready
 rm -f "$ready_file"
 mountpoint -q "$host_config"
 mountpoint -q "$launch_config"
+mountpoint -q /mnt/pi-deps
+mountpoint -q /mnt/pi-pnpm-store
 mountpoint -q /workspace
 mountpoint -q "$agent_dir/sessions"
 
 mkdir -p "$agent_dir"
+
+# Host node_modules may contain binaries for macOS, while this machine runs
+# Linux ARM64. Keep the dependency tree in the per-project runtime state so
+# package managers install optional native packages for this machine without
+# mutating the host checkout. Only JavaScript projects get the overlay.
+if [[ -f /workspace/package.json ]]; then
+  mkdir -p /workspace/node_modules
+  mount --bind /mnt/pi-deps /workspace/node_modules
+fi
+
+# Keep pnpm's content-addressable store outside the checkout as well. The
+# launcher mounts this directory from persistent host state for reuse between
+# disposable machine clones.
+mkdir -p /home/pi/.cache/pnpm
+mount --bind /mnt/pi-pnpm-store /home/pi/.cache/pnpm
 
 # Project files are intentionally writable, but repository metadata is not.
 if [[ -e /workspace/.git ]]; then
