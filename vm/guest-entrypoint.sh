@@ -10,6 +10,17 @@ export PATH="/home/pi/.local/share/mise/installs/node/latest/bin:/home/pi/.local
 export MISE_DATA_DIR=/home/pi/.local/share/mise
 export MISE_TRUSTED_CONFIG_PATHS=/workspace
 
+# The root-owned boot service applies mount and network policy before the agent
+# may run. A missing marker means provisioning or runtime preparation failed.
+for _ in $(seq 1 120); do
+  [[ -e /run/pi-sandbox-ready ]] && break
+  sleep 0.1
+done
+if [[ ! -e /run/pi-sandbox-ready ]]; then
+  journalctl -u pi-sandbox-prepare.service --no-pager -n 100 >&2 || true
+  exit 1
+fi
+
 # The user service starts at machine boot. Wait briefly so `docker` is ready by
 # the time the Pi prompt appears, and show its log if startup failed.
 for _ in $(seq 1 120); do

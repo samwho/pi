@@ -1,0 +1,12 @@
+[Unit]
+Description=Prepare Pi sandbox mounts and egress policy
+After=local-fs.target
+ConditionPathIsMountPoint=/mnt/pi-launch
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/pi-prepare-runtime
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

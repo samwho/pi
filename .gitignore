@@ -19,6 +19,9 @@ agent/sessions/
 agent/models-store.json
 agent/npm/node_modules/
 agent/git/
+__pycache__/
+*.pyc
+pyinfra-debug.log
 
 # Local filesystem metadata
 .DS_Store

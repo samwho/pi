@@ -1,27 +1,30 @@
 # Sandboxed Pi
 
 This repository launches Pi in a fresh, isolated OrbStack Arch Linux ARM64
-machine. The current project is the only project data mounted from macOS, its
-Git metadata is remounted read-only, sessions are kept in a separate
-profile/project directory, and Pi has rootless Docker and headless Chromium.
+machine. The current project and a policy-controlled projection of the host Pi
+configuration are mounted from macOS, Git metadata is remounted read-only,
+sessions are kept in a separate profile/project directory, and Pi has rootless
+Docker and headless Chromium.
 
 A legacy Docker-on-OrbStack launcher remains available for comparison.
 
 ## Quick start
 
 ```bash
-# Build or refresh the stopped template, tools, and baked Pi configuration.
+# Create or incrementally update the persistent stopped template with PyInfra.
 ~/.pi/agent/bin/pi-rebuild
 
 # From any project: clone the template, run Pi, then delete the clone on exit.
 ~/.pi/agent/bin/pi
 ```
 
-The template rebuild is the explicit update operation. It installs current Arch
-packages; the latest Node, Bun, Rust, uv, Python, and Biome through mise; Pi; and
-`chrome-devtools-mcp`. It also copies the host's Pi configuration except for
-host sessions. Rebuild after changing Pi packages, extensions, configuration,
-or `vm/` provisioning scripts.
+Despite its historical name, `pi-rebuild` does not recreate an existing
+template. PyInfra converges the persistent machine in place, retaining pacman,
+npm, mise, and container caches. It installs current Arch packages; the latest
+Node, Bun, Rust, uv, Python, and Biome through mise; Pi; and
+`chrome-devtools-mcp`. Run it to update tools or apply changes under
+`vm/pyinfra/` and `vm/`. Host Pi configuration is mounted live at runtime and
+does not require an update.
 
 Useful overrides:
 
@@ -52,17 +55,27 @@ fresh isolated machine
 clone deleted; template and mounted sessions remain
 ```
 
-OrbStack clones are copy-on-demand and start stopped. Only these host paths are
-selectively mounted into each clone:
+OrbStack clones are copy-on-demand and start stopped. The launcher only clones,
+attaches invocation-specific mounts, starts the machine, and executes Pi. These
+host paths are selectively mounted:
 
 - the current project at `/workspace`;
-- `$PI_VM_STATE_ROOT/sessions/<profile>/<project hash>` at Pi's session path.
+- `$PI_VM_STATE_ROOT/sessions/<profile>/<project hash>` at Pi's session path;
+- the host Pi agent directory at a temporary, hidden projection source;
+- a temporary directory containing the one allowed host IP.
 
-The host's general filesystem, host Pi sessions, SSH agent, USB devices, sound,
-and normal macOS command integration are not shared. The Pi configuration and
-credentials are copied into the template during rebuild, so they are available
-to the agent but changes made inside a disposable clone do not write back to the
-host configuration.
+A root-owned boot service projects each top-level host Pi configuration entry
+except `sessions/` into `~/.pi/agent`. `settings.json`, `auth.json`, OAuth/model
+state, trust, and MCP caches are read-write. All other entries—including
+extensions, skills, prompts, themes, MCP configuration, and npm/git package
+directories—are bind-mounted read-only. The original source mount is then
+covered so Pi cannot traverse into host sessions or unselected files.
+
+Changes to projected host files and directories are visible immediately. The
+read-write entries can also be changed, corrupted, or deleted by the agent; this
+is an explicit pragmatic concession. The host's general filesystem, host Pi
+sessions, SSH agent, USB devices, sound, and normal macOS command integration
+are not shared.
 
 ## Network policy
 
@@ -91,10 +104,11 @@ hardening. It is appropriate for ordinary untrusted dependencies and coding
 agents, not malware analysis or workloads actively attempting kernel escape.
 
 Pi can intentionally modify every file in the mounted project except `.git`,
-can reach public Internet services, and receives the credentials copied during
-template rebuild. Any credential visible to an Internet-enabled agent can be
-exfiltrated. Use separate `PI_VM_PROFILE` values for session isolation and keep
-only deliberately allowed credentials in the baked Pi configuration.
+can reach public Internet services, and receives the live host credentials
+mounted into its configuration. Any credential visible to an Internet-enabled
+agent can be exfiltrated. It can also modify the explicitly read-write host Pi
+state. Use separate `PI_VM_PROFILE` values for session isolation and keep only
+deliberately allowed credentials in the host Pi configuration.
 
 ## Files
 
@@ -103,11 +117,13 @@ only deliberately allowed credentials in the baked Pi configuration.
 | `agent/bin/pi` | Default OrbStack launcher wrapper. |
 | `agent/bin/pi-vm` | Clone lifecycle, selective mounts, host-IP policy, and Pi execution. |
 | `agent/bin/pi-rebuild` | Default template-rebuild wrapper. |
-| `agent/bin/pi-vm-rebuild` | Creates and provisions the stopped Arch ARM64 template. |
-| `vm/setup.sh` | Packages, current tools, unprivileged account, services, and Pi installation. |
+| `agent/bin/pi-vm-rebuild` | Creates the template if absent and runs incremental PyInfra convergence. |
+| `vm/pyinfra/inventory.py` | Connects PyInfra to the template through OrbStack's built-in SSH server. |
+| `vm/pyinfra/deploy.py` | Declarative packages, users, files, services, and explicit tool updates. |
+| `vm/prepare-runtime.sh` | Projects live Pi config, protects Git metadata, and applies network policy. |
 | `vm/network-lockdown.sh` | Root-owned egress filtering. |
 | `vm/rootless-dockerd.sh` | Rootless Docker daemon. |
-| `vm/guest-entrypoint.sh` | Waits for Docker and starts Pi in `/workspace`. |
+| `vm/guest-entrypoint.sh` | Waits for runtime policy and Docker, then starts Pi in `/workspace`. |
 | `agent/mcp.json` | Headless Chromium MCP configuration. |
 
 ## Legacy Docker sandbox

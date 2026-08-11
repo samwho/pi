@@ -1,3 +1,3 @@
 #!/bin/bash
-# Rebuild the isolated Arch ARM64 template, tools, and baked Pi configuration.
+# Create or incrementally converge the persistent Arch ARM64 template.
 exec "$HOME/.pi/agent/bin/pi-vm-rebuild" "$@"

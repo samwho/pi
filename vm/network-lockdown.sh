@@ -32,9 +32,9 @@ ensure_jump "$iptables_bin" PI_SANDBOX
 "$iptables_bin" -w -A PI_SANDBOX -o lo -j ACCEPT
 "$iptables_bin" -w -A PI_SANDBOX -d 127.0.0.0/8 -j ACCEPT
 
-# The host launcher writes exactly one validated address before reloading this policy.
-if [[ -r /etc/pi-sandbox/host-ip ]]; then
-  host_ip="$(tr -d '[:space:]' </etc/pi-sandbox/host-ip)"
+# The host launcher mounts exactly one validated address for this clone.
+if [[ -r /mnt/pi-launch/host-ip ]]; then
+  host_ip="$(tr -d '[:space:]' </mnt/pi-launch/host-ip)"
   if [[ "$host_ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
     "$iptables_bin" -w -A PI_SANDBOX -d "$host_ip"/32 -j ACCEPT
   fi
