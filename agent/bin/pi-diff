@@ -1,0 +1,39 @@
+#!/bin/bash
+set -euo pipefail
+
+template="${PI_VM_TEMPLATE:-pi-template}"
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
+
+if ! machine_info="$(orb info "$template" 2>/dev/null)"; then
+  echo "$template is missing. Run $HOME/.pi/agent/bin/pi-update." >&2
+  exit 1
+fi
+
+state="$(awk -F': ' '$1 == "State" { print $2; exit }' <<<"$machine_info")"
+started_here=false
+case "$state" in
+  stopped)
+    orb start "$template" >/dev/null
+    started_here=true
+    ;;
+  running) ;;
+  *)
+    echo "Cannot inspect template $template while it is $state." >&2
+    exit 1
+    ;;
+esac
+
+cleanup() {
+  if [[ "$started_here" == true ]]; then
+    orb stop "$template" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+PI_VM_TEMPLATE="$template" \
+  mise exec -q uv@latest -- \
+  uv run --project "$repo_root" pyinfra --dry --diff \
+    --chdir "$repo_root/vm/pyinfra" \
+    inventory.py deploy.py

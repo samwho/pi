@@ -12,6 +12,9 @@ Docker and headless Chromium.
 # Create or incrementally update the persistent stopped template with PyInfra.
 ~/.pi/agent/bin/pi-update
 
+# Preview the PyInfra changes without modifying the template.
+~/.pi/agent/bin/pi-diff
+
 # From any project: clone the template, run Pi, then delete the clone on exit.
 ~/.pi/agent/bin/pi
 ```
@@ -125,6 +128,7 @@ deliberately allowed credentials in the host Pi configuration.
 | --- | --- |
 | `agent/bin/pi` | Clone lifecycle, selective mounts, host-IP policy, and Pi execution. |
 | `agent/bin/pi-update` | Creates the template if absent and runs incremental PyInfra convergence. |
+| `agent/bin/pi-diff` | Starts the template if necessary and previews PyInfra operations and file diffs. |
 | `pyproject.toml`, `uv.lock` | Locked Python/PyInfra project used by updates and editor tooling. |
 | `vm/pyinfra/inventory.py` | Connects PyInfra to the template through OrbStack's built-in SSH server. |
 | `vm/pyinfra/deploy.py` | Declarative packages, users, files, services, and tool state. |

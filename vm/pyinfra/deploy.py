@@ -103,7 +103,6 @@ pacman.packages(
 
 for path, owner, mode in host.loop(
     [
-        ("/etc/pi-sandbox", "root", "0755"),
         ("/home/pi/.local/bin", "pi", "0755"),
         # Rootless dockerd adds group execute while running.
         ("/home/pi/.local/share/docker", "pi", "0710"),
@@ -119,38 +118,6 @@ for path, owner, mode in host.loop(
     ],
 ):
     files.directory(path=path, user=owner, group=owner, mode=mode)
-
-# Remove configuration copied by the superseded image-style provisioner.
-for path in host.loop(
-    [
-        "/home/pi/.pi/agent/bin",
-        "/home/pi/.pi/agent/extensions",
-        "/home/pi/.pi/agent/git",
-        "/home/pi/.pi/agent/npm",
-        "/home/pi/.pi/agent/skills",
-        "/home/pi/.pi/agent/prompts",
-        "/home/pi/.pi/agent/themes",
-    ],
-):
-    files.directory(path=path, present=False)
-for name in host.loop(
-    [
-        "AGENTS.md",
-        "APPEND_SYSTEM.md",
-        "SYSTEM.md",
-        "auth.json",
-        "keybindings.json",
-        "mcp-cache.json",
-        "mcp-npx-cache.json",
-        "mcp.json",
-        "models-store.json",
-        "models.json",
-        "oauth.json",
-        "settings.json",
-        "trust.json",
-    ],
-):
-    files.file(path=f"/home/pi/.pi/agent/{name}", present=False)
 
 managed_scripts = {
     "network-lockdown.sh": "/usr/local/bin/pi-network-lockdown",
@@ -203,25 +170,6 @@ files.put(
     dest="/var/lib/systemd/linger/pi",
     mode="0644",
 )
-
-# Retire units and launchers from earlier revisions.
-systemd.service(
-    name="Disable the superseded firewall service",
-    service="pi-network-lockdown.service",
-    running=False,
-    enabled=False,
-)
-files.file(path="/etc/systemd/system/pi-network-lockdown.service", present=False)
-systemd.service(
-    name="Disable the superseded Docker user service",
-    service="pi-docker.service",
-    running=False,
-    enabled=False,
-    user_mode=True,
-    machine="pi@",
-)
-files.file(path="/home/pi/.config/systemd/user/pi-docker.service", present=False)
-files.file(path="/usr/local/bin/pi-rootless-dockerd", present=False)
 
 systemd.daemon_reload(
     name="Reload changed system units",
