@@ -87,9 +87,17 @@ orb start "$machine" >/dev/null
 sandbox_term="${TERM:-xterm-256color}"
 [[ "$sandbox_term" == *ghostty* ]] && sandbox_term=xterm-256color
 
+# A bare launcher invocation resumes the most recent session for this project.
+# Supplying any argument preserves Pi's normal CLI behavior (use -c explicitly
+# when continuing alongside an initial prompt).
+guest_args=("$@")
+if (( ${#guest_args[@]} == 0 )); then
+  guest_args=(-c)
+fi
+
 orb -m "$machine" -u pi \
   env "TERM=$sandbox_term" \
       "COLORTERM=${COLORTERM:-}" \
       "TERM_PROGRAM=${TERM_PROGRAM:-}" \
       PI_SKIP_VERSION_CHECK=1 \
-  bash -c 'cd /workspace && exec /usr/local/bin/pi-guest "$@"' pi "$@"
+  bash -c 'cd /workspace && exec /usr/local/bin/pi-guest "$@"' pi "${guest_args[@]}"

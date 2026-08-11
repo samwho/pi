@@ -33,11 +33,9 @@ fi
 
 # Project live host configuration into the machine-local Pi directory. Mutable
 # Pi state is writable by explicit policy; every other top-level config entry is
-# read-only. Host sessions are never projected.
+# read-only. Host sessions and atomic-write caches are never projected.
 rw_entries=(
   auth.json
-  mcp-cache.json
-  mcp-npx-cache.json
   models-store.json
   oauth.json
   settings.json
@@ -54,7 +52,9 @@ is_rw_entry() {
 
 while IFS= read -r -d '' source; do
   name="$(basename "$source")"
-  [[ "$name" == sessions ]] && continue
+  case "$name" in
+    sessions|mcp-cache.json|mcp-npx-cache.json) continue ;;
+  esac
   destination="$agent_dir/$name"
 
   if [[ -d "$source" ]]; then
