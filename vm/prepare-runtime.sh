@@ -53,7 +53,7 @@ is_rw_entry() {
 while IFS= read -r -d '' source; do
   name="$(basename "$source")"
   case "$name" in
-    sessions|mcp-cache.json|mcp-npx-cache.json) continue ;;
+    sessions|mcp-cache.json|mcp-npx-cache.json|pi-pretty) continue ;;
   esac
   destination="$agent_dir/$name"
 
