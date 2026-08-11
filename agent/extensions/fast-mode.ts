@@ -28,6 +28,18 @@ const SUPPORTED_MODELS = new Set([
 
 type JsonObject = Record<string, unknown>;
 
+type ModelPreset = {
+  modelId: string;
+  thinking: "xhigh" | "medium";
+  fast: boolean;
+};
+
+const MODEL_PRESETS = {
+  luna: { modelId: "gpt-5.6-luna", thinking: "xhigh", fast: true },
+  terra: { modelId: "gpt-5.6-terra", thinking: "medium", fast: false },
+  sol: { modelId: "gpt-5.6-sol", thinking: "medium", fast: false },
+} satisfies Record<string, ModelPreset>;
+
 type PiFileOptions = {
   env?: Record<string, string | undefined>;
   home?: string;
@@ -127,16 +139,53 @@ export default function (pi: ExtensionAPI): void {
     }
   };
 
-  const toggle = async (ctx: ExtensionContext): Promise<void> => {
-    enabled = !enabled;
+  const setEnabled = (next: boolean, ctx: ExtensionContext): void => {
+    enabled = next;
     saveEnabled(enabled);
+    setFastStatus(ctx, enabled);
+  };
+
+  const toggle = async (ctx: ExtensionContext): Promise<void> => {
+    setEnabled(!enabled, ctx);
     announceState(ctx, enabled);
+  };
+
+  const applyPreset = async (name: string, preset: ModelPreset, ctx: ExtensionContext): Promise<void> => {
+    const model = ctx.modelRegistry.find("openai-codex", preset.modelId);
+    if (!model) {
+      ctx.ui.notify(`Model not found: openai-codex/${preset.modelId}`, "error");
+      return;
+    }
+
+    try {
+      const selected = await pi.setModel(model);
+      if (!selected) {
+        ctx.ui.notify(`No API key configured for openai-codex/${preset.modelId}.`, "error");
+        return;
+      }
+
+      pi.setThinkingLevel(preset.thinking);
+      setEnabled(preset.fast, ctx);
+      ctx.ui.notify(
+        `${name}: ${model.provider}/${model.id}, ${preset.thinking} thinking, fast ${preset.fast ? "on" : "off"}.`,
+        "info",
+      );
+    } catch (error) {
+      ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+    }
   };
 
   pi.registerCommand("fast", {
     description: "Toggle GPT Fast mode (service_tier: priority)",
     handler: async (_args, ctx) => toggle(ctx),
   });
+
+  for (const [name, preset] of Object.entries(MODEL_PRESETS)) {
+    pi.registerCommand(name, {
+      description: `Switch to ${preset.modelId} (${preset.thinking} thinking, fast ${preset.fast ? "on" : "off"})`,
+      handler: async (_args, ctx) => applyPreset(name, preset, ctx),
+    });
+  }
 
   for (const shortcut of loadShortcuts()) {
     pi.registerShortcut(shortcut as Parameters<ExtensionAPI["registerShortcut"]>[0], {
