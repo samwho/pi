@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
-"""Render PyInfra's JSON dry-run plan as a compact, readable diff."""
+"""Render PyInfra's JSON dry-run plan as a polished terminal diff."""
 
 import json
 import re
 import sys
 from pathlib import Path
+
+from rich.console import Console
+from rich.panel import Panel
+from rich.syntax import Syntax
+from rich.table import Table
+from rich.text import Text
 
 
 def plural(count: int, word: str) -> str:
@@ -38,23 +44,81 @@ def main() -> int:
     with Path(sys.argv[1]).open() as file:
         plan = json.load(file)["plan"]
     log = Path(sys.argv[2]).read_text()
+    console = Console()
 
-    changes = [operation["name"] for operation in plan if operation["hosts_with_change"]]
+    changed_operations = [operation for operation in plan if operation["hosts_with_change"]]
     diffs = file_diffs(log)
+    hosts = sorted(
+        {
+            host
+            for operation in changed_operations
+            for host in operation["hosts_with_change"]
+        }
+    )
+    target = ", ".join(hosts) if hosts else "template"
 
-    if not changes:
-        print("No PyInfra changes.")
+    console.print()
+    console.print(
+        Text.assemble(
+            ("PyInfra plan", "bold cyan"),
+            ("  •  ", "dim"),
+            (target, "bold"),
+        ),
+        justify="center",
+    )
+
+    if not changed_operations:
+        console.print(
+            Panel.fit(
+                "[bold green]✓ No changes[/bold green]\n[dim]The template matches the deployment.[/dim]",
+                border_style="green",
+                padding=(0, 3),
+            ),
+            justify="center",
+        )
         return 0
 
-    print("Changes")
-    for name in changes:
-        print(f"  + {name}")
+    table = Table.grid(expand=True, padding=(0, 1))
+    table.add_column(width=2, no_wrap=True)
+    table.add_column(ratio=1)
+    for operation in changed_operations:
+        table.add_row("[bold green]+[/bold green]", Text(operation["name"], style="bold"))
+
+    console.print(
+        Panel(
+            table,
+            title=f"[bold]{plural(len(changed_operations), 'planned change')}[/bold]",
+            title_align="left",
+            border_style="cyan",
+            padding=(0, 1),
+        )
+    )
 
     if diffs:
-        print("\nFile diffs")
-        print("\n".join(diffs))
+        console.print(
+            Panel(
+                Syntax(
+                    "\n".join(diffs),
+                    "diff",
+                    theme="ansi_dark",
+                    word_wrap=False,
+                    background_color="default",
+                ),
+                title="[bold]Managed file diffs[/bold]",
+                title_align="left",
+                border_style="magenta",
+                padding=(0, 1),
+            )
+        )
 
-    print(f"\n{plural(len(changes), 'change')}")
+    console.print(
+        Text.assemble(
+            ("● ", "green"),
+            (plural(len(changed_operations), "change"), "bold"),
+            (" would be applied", "dim"),
+        ),
+        justify="right",
+    )
     return 0
 
 

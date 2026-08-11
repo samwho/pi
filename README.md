@@ -19,8 +19,9 @@ Docker and headless Chromium.
 ~/.pi/agent/bin/pi
 ```
 
-`pi-diff` renders only operations that would change and includes unified diffs
-for managed files, avoiding PyInfra's full-width all-operations table.
+`pi-diff` uses Rich to render only operations that would change and includes
+syntax-highlighted unified diffs for managed files, avoiding PyInfra's
+full-width all-operations table.
 `pi-update` converges the persistent template in place with PyInfra, retaining
 pacman, npm, mise, and container caches. It installs current Arch packages; the
 latest Node, Bun, Rust, uv, Python, and Biome through mise; Pi; and
