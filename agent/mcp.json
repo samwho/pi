@@ -1,11 +1,8 @@
 {
   "mcpServers": {
     "chrome-devtools": {
-      "command": "/home/pi/.local/share/mise/installs/bun/latest/bin/bun",
+      "command": "/home/pi/.local/share/mise/installs/node/latest/bin/chrome-devtools-mcp",
       "args": [
-        "x",
-        "--silent",
-        "chrome-devtools-mcp@latest",
         "--headless",
         "--isolated",
         "--executablePath=/usr/bin/chromium",

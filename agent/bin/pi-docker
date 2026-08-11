@@ -1,0 +1,201 @@
+#!/bin/bash
+set -euo pipefail
+
+# The official Arch image is amd64-only. PI_DOCKER_PLATFORM permits an explicit
+# override for testing a different image, but image and platform must agree.
+image="${PI_DOCKER_IMAGE:-pi-sandbox}"
+platform="${PI_DOCKER_PLATFORM:-linux/amd64}"
+
+if ! docker image inspect "$image" >/dev/null 2>&1; then
+  echo "$image is missing. Run $HOME/.pi/agent/bin/pi-docker-rebuild." >&2
+  exit 1
+fi
+
+project_dir="$(pwd -P)"
+project_key="$(printf '%s' "$project_dir" | shasum -a 256 | cut -c1-16)"
+# Docker-in-Docker is opt-in: most Pi sessions do not need its cold-start cost.
+dind=0
+[[ "${PI_ENABLE_DIND:-}" == "1" ]] && dind=1
+# Sessions and credentials persist without granting the sandbox access to the
+# host's Pi home. Docker state/socket are project-scoped to prevent one project
+# from controlling another project's nested containers.
+sessions_volume="pi-agent-sessions-$project_key"
+docker_volume="pi-agent-docker-$project_key"
+docker_socket_volume="pi-agent-docker-socket-$project_key"
+daemon_container="pi-dockerd-$project_key"
+runtime_volume="pi-agent-runtime"
+
+docker volume create "$sessions_volume" >/dev/null
+docker volume create "$runtime_volume" >/dev/null
+
+if (( dind )); then
+  # Do not create Docker resources at all for ordinary Pi sessions.
+  docker volume create "$docker_volume" >/dev/null
+  docker volume create "$docker_socket_volume" >/dev/null
+daemon_memory="${PI_DOCKER_DAEMON_MEMORY:-2g}"
+daemon_cpus="${PI_DOCKER_DAEMON_CPUS:-4}"
+daemon_pids="${PI_DOCKER_DAEMON_PIDS_LIMIT:-512}"
+# Recreate a stale daemon when its image, resources, or project changes.
+image_id="$(docker image inspect "$image" --format '{{.Id}}')"
+daemon_spec="$(printf '%s' "$image_id|$platform|$daemon_memory|$daemon_cpus|$daemon_pids|$project_dir" | shasum -a 256 | cut -d' ' -f1)"
+current_daemon_spec="$(docker container inspect "$daemon_container" --format '{{ index .Config.Labels "dev.pi.daemon.spec" }}' 2>/dev/null || true)"
+
+if [[ -n "$current_daemon_spec" && "$current_daemon_spec" != "$daemon_spec" ]]; then
+  docker rm -f "$daemon_container" >/dev/null
+  current_daemon_spec=""
+fi
+
+if [[ -z "$current_daemon_spec" ]]; then
+  daemon_mounts=(
+    --mount "type=bind,src=$project_dir,dst=/workspace"
+    --mount "type=volume,src=$docker_volume,dst=/home/pi/.local/share/docker"
+    --mount "type=volume,src=$docker_socket_volume,dst=/run/pi-docker"
+  )
+  if [[ -e "$project_dir/.git" ]]; then
+    daemon_mounts+=(--mount "type=bind,src=$project_dir/.git,dst=/workspace/.git,readonly")
+  fi
+
+  # The daemon has no host Docker socket. It receives only the capabilities
+  # RootlessKit needs for a nested user/network namespace; --privileged is never used.
+  if ! docker run -d --name "$daemon_container" --platform "$platform" \
+    --read-only \
+    --cap-drop=ALL \
+    --cap-add=CHOWN \
+    --cap-add=NET_ADMIN \
+    --cap-add=SETGID \
+    --cap-add=SETPCAP \
+    --cap-add=SETUID \
+    --security-opt=seccomp=unconfined \
+    --security-opt=apparmor=unconfined \
+    --security-opt=systempaths=unconfined \
+    --device=/dev/net/tun \
+    --pids-limit "$daemon_pids" \
+    --memory "$daemon_memory" \
+    --memory-swap "$daemon_memory" \
+    --cpus "$daemon_cpus" \
+    --tmpfs /tmp:rw,nosuid,nodev,size=256m,mode=1777 \
+    --tmpfs /run:rw,nosuid,nodev,size=64m,mode=0755 \
+    --label "dev.pi.daemon.spec=$daemon_spec" \
+    --label "dev.pi.project=$project_dir" \
+    "${daemon_mounts[@]}" \
+    --entrypoint /usr/local/bin/pi-dockerd-entrypoint \
+    "$image" >/dev/null; then
+    if ! docker container inspect "$daemon_container" >/dev/null 2>&1; then
+      exit 1
+    fi
+  fi
+elif [[ "$(docker container inspect "$daemon_container" --format '{{.State.Running}}')" != "true" ]]; then
+  docker start "$daemon_container" >/dev/null
+fi
+
+for _ in $(seq 1 120); do
+  if docker exec --user 1000:1000 "$daemon_container" docker info >/dev/null 2>&1; then
+    break
+  fi
+  if [[ "$(docker container inspect "$daemon_container" --format '{{.State.Running}}' 2>/dev/null || true)" != "true" ]]; then
+    docker logs "$daemon_container" >&2 || true
+    exit 1
+  fi
+  sleep 0.25
+done
+
+if ! docker exec --user 1000:1000 "$daemon_container" docker info >/dev/null 2>&1; then
+  docker logs "$daemon_container" >&2 || true
+  exit 1
+fi
+fi
+
+# The project is the only host directory writable by Pi. Git metadata is added
+# separately as read-only so status/diff/history work but commits and checkouts do not.
+mounts=(
+  --mount "type=bind,src=$project_dir,dst=/workspace"
+  --mount "type=volume,src=$runtime_volume,dst=/home/pi/.pi/state"
+  --mount "type=volume,src=$sessions_volume,dst=/home/pi/.pi/agent/sessions"
+)
+if (( dind )); then
+  mounts+=(--mount "type=volume,src=$docker_socket_volume,dst=/run/pi-docker")
+fi
+
+# Keep repository metadata readable while blocking writes from Pi and nested containers.
+if [[ -e "$project_dir/.git" ]]; then
+  mounts+=(--mount "type=bind,src=$project_dir/.git,dst=/workspace/.git,readonly")
+fi
+
+agent_memory="${PI_DOCKER_MEMORY:-2g}"
+# Pi creates a short-lived settings lock beside its image-baked configuration.
+# Keep the agent layer ephemeral but writable; mounting a volume here would hide
+# the image's /home/pi/.pi/agent contents.
+# The agent is constrained independently of the optional daemon. Writable tmpfs
+# locations are explicitly sized; no host configuration directory is mounted.
+agent_args=(
+  run --rm -i --platform "$platform"
+  --cap-drop=ALL
+  --cap-add=CHOWN
+  --cap-add=NET_ADMIN
+  --cap-add=SETGID
+  --cap-add=SETPCAP
+  --cap-add=SETUID
+  --security-opt=no-new-privileges=true
+  --pids-limit "${PI_DOCKER_PIDS_LIMIT:-512}"
+  --memory "$agent_memory"
+  --memory-swap "$agent_memory"
+  --cpus "${PI_DOCKER_CPUS:-4}"
+  # MCP package launchers may execute transient scripts while installing.
+  --tmpfs /tmp:rw,nosuid,nodev,exec,size=1g,mode=1777
+  --tmpfs /run:rw,nosuid,nodev,size=64m,mode=0755
+  # Chromium needs a writable configuration directory for its profile and crash handler.
+  --tmpfs /home/pi/.config:rw,nosuid,nodev,size=128m,mode=0700,uid=1000,gid=1000
+  --tmpfs /home/pi/.cache:rw,nosuid,nodev,size=512m,mode=0700,uid=1000,gid=1000
+  --tmpfs /home/pi/.local/state:rw,nosuid,nodev,size=64m,mode=0700,uid=1000,gid=1000
+  # Package caches must be executable: npm/bun launch downloaded CLI scripts from them.
+  --tmpfs /home/pi/.npm:rw,nosuid,nodev,exec,size=512m,mode=0700,uid=1000,gid=1000
+  # bunx stores downloaded MCP packages here and executes their entry scripts.
+  --tmpfs /home/pi/.bun:rw,nosuid,nodev,exec,size=512m,mode=0700,uid=1000,gid=1000
+)
+if [[ -t 1 ]]; then
+  agent_args+=(-t)
+fi
+
+# Docker does not forward terminal variables. Use a standard terminfo entry and keep color hints.
+sandbox_term="${TERM:-xterm-256color}"
+if [[ "$sandbox_term" == *ghostty* ]]; then
+  sandbox_term="xterm-256color"
+fi
+# Pass every non-loopback IPv4 address assigned to this host. The sandbox's
+# firewall permits these exact addresses while retaining its private-network deny.
+host_lan_ips=""
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  host_lan_ips="$(ifconfig | awk '/inet / { print $2 }' | awk '$1 !~ /^127\./' | paste -sd, -)"
+elif command -v ip >/dev/null 2>&1; then
+  host_lan_ips="$(ip -4 -o addr show scope global | awk '{ sub(/\/.*/, "", $4); print $4 }' | paste -sd, -)"
+fi
+
+# Preserve terminal capability hints without passing the host environment wholesale.
+terminal_env=(-e "TERM=$sandbox_term")
+if [[ -n "${COLORTERM:-}" ]]; then
+  terminal_env+=(-e "COLORTERM=$COLORTERM")
+elif [[ "${TERM:-}" == *ghostty* || "${TERM_PROGRAM:-}" == "ghostty" ]]; then
+  terminal_env+=(-e "COLORTERM=truecolor")
+fi
+if [[ -n "${TERM_PROGRAM:-}" ]]; then
+  terminal_env+=(-e "TERM_PROGRAM=$TERM_PROGRAM")
+elif [[ "${TERM:-}" == *ghostty* ]]; then
+  terminal_env+=(-e "TERM_PROGRAM=ghostty")
+fi
+
+cleanup() {
+  if (( dind )); then
+    docker rm -f "$daemon_container" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+mise exec -q node@latest -- docker "${agent_args[@]}" \
+  "${mounts[@]}" \
+  "${terminal_env[@]}" \
+  -e DOCKER_HOST=unix:///run/pi-docker/docker.sock \
+  -e GIT_OPTIONAL_LOCKS=0 \
+  -e "PI_HOST_LAN_IPS=$host_lan_ips" \
+  "$image" "$@"

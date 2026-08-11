@@ -1,0 +1,14 @@
+#!/bin/bash
+set -euo pipefail
+
+# Keep build settings aligned with the launcher; callers may override either.
+image="${PI_DOCKER_IMAGE:-pi-sandbox}"
+pi_dir="${PI_CONFIG_DIR:-$HOME/.pi}"
+platform="${PI_DOCKER_PLATFORM:-linux/amd64}"
+
+# Building from ~/.pi makes Dockerfile COPY instructions include the baked,
+# non-secret agent configuration while .dockerignore excludes local state.
+exec docker build --platform "$platform" \
+  -t "$image" \
+  -f "$pi_dir/docker/Dockerfile" \
+  "$pi_dir"

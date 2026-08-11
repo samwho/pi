@@ -1,0 +1,68 @@
+#!/bin/bash
+set -euo pipefail
+
+template="${PI_VM_TEMPLATE:-pi-template}"
+pi_dir="${PI_CONFIG_DIR:-$HOME/.pi}"
+
+if orb info "$template" >/dev/null 2>&1; then
+  orb delete -f "$template" >/dev/null
+fi
+
+cleanup() {
+  if [[ "${completed:-0}" != 1 ]]; then
+    orb delete -f "$template" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT
+
+echo "Creating isolated Arch ARM64 template $template..."
+orb create \
+  --arch arm64 \
+  --isolated \
+  --user pi \
+  --cpus "${PI_VM_CPUS:-4}" \
+  --memory "${PI_VM_MEMORY:-4G}" \
+  --disk "${PI_VM_DISK:-64G}" \
+  arch:current "$template"
+
+# Provisioning files and Pi configuration are copied rather than mounted, so the
+# template never receives general access to the macOS file system.
+staging="$(mktemp -d)"
+trap 'rm -rf "$staging"; cleanup' EXIT
+mkdir -p "$staging/pi-vm" "$staging/agent"
+cp "$pi_dir"/vm/*.sh "$staging/pi-vm/"
+rsync -a \
+  --exclude sessions/ \
+  --exclude '*.lock' \
+  "$pi_dir/agent/" "$staging/agent/"
+
+orb push -m "$template" "$staging/pi-vm"
+orb push -m "$template" "$staging/agent"
+orb -m "$template" -u root /home/pi/pi-vm/setup.sh
+orb -m "$template" -u root bash -lc '
+  rm -rf /home/pi/.pi/agent
+  mv /home/pi/agent /home/pi/.pi/agent
+  mkdir -p /home/pi/.pi/agent/sessions
+  chown -R pi:pi /home/pi/.pi
+  chmod 0700 /home/pi/.pi/agent/sessions
+'
+
+# Verify the boundaries and required tools before making the stopped machine a template.
+orb -m "$template" -u pi bash -lc '
+  set -e
+  test "$(uname -m)" = aarch64
+  ! sudo -n true >/dev/null 2>&1
+  command -v chromium >/dev/null
+  command -v docker >/dev/null
+  /home/pi/.local/share/mise/installs/node/latest/bin/chrome-devtools-mcp --version >/dev/null
+  /usr/local/bin/pi-guest --version
+  export DOCKER_HOST="unix:///run/user/$(id -u)/docker.sock"
+  docker info >/dev/null
+  docker run --rm alpine:latest true
+'
+orb stop "$template" >/dev/null
+
+completed=1
+rm -rf "$staging"
+trap - EXIT
+echo "Template $template is ready."

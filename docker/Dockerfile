@@ -53,7 +53,8 @@ RUN curl --proto '=https' --tlsv1.2 -fsSL https://mise.run | sh \
   && python --version \
   && biome --version \
   && chromium --version \
-  && npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+  && npm install -g --ignore-scripts \
+     @earendil-works/pi-coding-agent chrome-devtools-mcp
 
 USER root
 
