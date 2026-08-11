@@ -1,8 +1,0 @@
-.git
-agent/auth.json*
-agent/oauth.json*
-agent/bin
-agent/mcp-cache.json*
-agent/mcp-npx-cache.json*
-agent/models-store.json*
-agent/sessions

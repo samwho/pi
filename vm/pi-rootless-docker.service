@@ -1,0 +1,15 @@
+[Unit]
+Description=Rootless Docker for Pi
+After=network.target
+
+[Service]
+Environment=HOME=%h
+Environment=DOCKER_HOST=unix://%t/docker.sock
+ExecStartPre=-/usr/bin/rm -f %t/docker.sock
+ExecStartPre=/usr/bin/mkdir -p %h/.local/share/docker %h/.local/state
+ExecStart=/usr/bin/rootlesskit --net=slirp4netns --mtu=1500 --disable-host-loopback --port-driver=builtin --copy-up=/etc /usr/bin/dockerd --data-root=%h/.local/share/docker --exec-root=%t/dockerd --host=unix://%t/docker.sock --dns=1.1.1.1 --storage-driver=fuse-overlayfs
+Restart=on-failure
+RestartSec=1
+
+[Install]
+WantedBy=default.target

@@ -1,3 +1,79 @@
 #!/bin/bash
-# Launch Pi in a fresh clone of the isolated OrbStack template.
-exec "$HOME/.pi/agent/bin/pi-vm" "$@"
+set -euo pipefail
+
+template="${PI_VM_TEMPLATE:-pi-template}"
+if ! orb info "$template" >/dev/null 2>&1; then
+  echo "$template is missing. Run $HOME/.pi/agent/bin/pi-update." >&2
+  exit 1
+fi
+
+project_dir="$(pwd -P)"
+project_key="$(printf '%s' "$project_dir" | shasum -a 256 | cut -c1-12)"
+profile="${PI_VM_PROFILE:-default}"
+if [[ ! "$profile" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+  echo "PI_VM_PROFILE may contain only letters, digits, dot, underscore, and dash." >&2
+  exit 2
+fi
+
+pi_dir="${PI_CONFIG_DIR:-$HOME/.pi}"
+host_config="$pi_dir/agent"
+if [[ ! -d "$host_config" ]]; then
+  echo "Pi configuration directory is missing: $host_config" >&2
+  exit 1
+fi
+
+state_root="${PI_VM_STATE_ROOT:-$HOME/.local/share/pi-vm}"
+sessions_dir="$state_root/sessions/$profile/$project_key"
+runtime_root="$state_root/runtime"
+mkdir -p "$sessions_dir" "$runtime_root"
+chmod 0700 "$state_root" "$state_root/sessions" "$state_root/sessions/$profile" \
+  "$sessions_dir" "$runtime_root" 2>/dev/null || true
+launch_dir="$(mktemp -d "$runtime_root/launch.XXXXXX")"
+chmod 0700 "$launch_dir"
+
+# Isolated machines cannot use host.orb.internal, but without
+# --isolate-network they may reach one explicitly permitted host IP.
+host_ip="${PI_VM_HOST_IP:-}"
+if [[ -z "$host_ip" ]]; then
+  interface="$(route -n get default 2>/dev/null | awk '/interface:/ { print $2; exit }')"
+  [[ -n "$interface" ]] && host_ip="$(ipconfig getifaddr "$interface" 2>/dev/null || true)"
+fi
+if [[ ! "$host_ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+  echo "Could not determine the host IPv4 address; set PI_VM_HOST_IP explicitly." >&2
+  rm -rf "$launch_dir"
+  exit 1
+fi
+printf '%s\n' "$host_ip" >"$launch_dir/host-ip"
+
+machine="pi-${project_key}-$$-$(printf '%04x' "$((RANDOM & 65535))")"
+cleanup() {
+  orb delete -f "$machine" >/dev/null 2>&1 || true
+  rm -rf "$launch_dir"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# Everything machine-wide is already provisioned in the persistent template.
+# Runtime work is limited to cloning and attaching the four paths whose values
+# are invocation-specific. The root-owned boot service prepares their policy.
+orb clone "$template" "$machine" >/dev/null
+for path in "$project_dir" "$sessions_dir" "$host_config" "$launch_dir"; do
+  if [[ "$path" == *','* ]]; then
+    echo "OrbStack mount paths containing commas are not supported: $path" >&2
+    exit 2
+  fi
+done
+orb config set "machine.$machine.mounts" \
+  "$project_dir:/workspace,$sessions_dir:/home/pi/.pi/agent/sessions,$host_config:/mnt/pi-host,$launch_dir:/mnt/pi-launch"
+orb start "$machine" >/dev/null
+
+sandbox_term="${TERM:-xterm-256color}"
+[[ "$sandbox_term" == *ghostty* ]] && sandbox_term=xterm-256color
+
+orb -m "$machine" -u pi \
+  env "TERM=$sandbox_term" \
+      "COLORTERM=${COLORTERM:-}" \
+      "TERM_PROGRAM=${TERM_PROGRAM:-}" \
+      PI_SKIP_VERSION_CHECK=1 \
+  bash -c 'cd /workspace && exec /usr/local/bin/pi-guest "$@"' pi "$@"

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 template="${PI_VM_TEMPLATE:-pi-template}"
-pi_dir="${PI_CONFIG_DIR:-$HOME/.pi}"
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 pyinfra_version="${PI_PYINFRA_VERSION:-3.10.0}"
 cpus="${PI_VM_CPUS:-4}"
 memory="${PI_VM_MEMORY:-4G}"
@@ -56,7 +56,7 @@ trap cleanup EXIT
 PI_VM_TEMPLATE="$template" \
   mise exec -q uv@latest -- \
   uvx --from "pyinfra==$pyinfra_version" pyinfra -y \
-    --chdir "$pi_dir/vm/pyinfra" \
+    --chdir "$repo_root/vm/pyinfra" \
     inventory.py deploy.py
 
 # Validate the persistent base without requiring runtime host mounts. The
@@ -65,7 +65,7 @@ PI_VM_TEMPLATE="$template" \
 orb -m "$template" -u pi bash -lc '
   set -euo pipefail
   test "$(uname -m)" = aarch64
-  ! sudo -n true >/dev/null 2>&1
+  ! command -v sudo >/dev/null
   command -v chromium >/dev/null
   /home/pi/.local/share/mise/installs/node/latest/bin/chrome-devtools-mcp --version >/dev/null
   /home/pi/.local/share/mise/installs/node/latest/bin/pi --version

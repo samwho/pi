@@ -1,3 +1,0 @@
-#!/bin/bash
-# Legacy Docker sandbox with its isolated rootless nested daemon enabled.
-exec env PI_ENABLE_DIND=1 "$HOME/.pi/agent/bin/pi-docker" "$@"

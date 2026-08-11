@@ -28,7 +28,7 @@ for _ in $(seq 1 120); do
   sleep 0.1
 done
 if ! docker info >/dev/null 2>&1; then
-  journalctl --user -u pi-docker.service --no-pager -n 100 >&2 || true
+  journalctl --user -u pi-rootless-docker.service --no-pager -n 100 >&2 || true
   exit 1
 fi
 

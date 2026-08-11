@@ -2,32 +2,58 @@ from io import StringIO
 from pathlib import Path
 
 from pyinfra import host
+from pyinfra.facts.server import Users
 from pyinfra.operations import files, pacman, server, systemd
+from pyinfra.operations.util import any_changed
+
+from operations import mise_npm_packages, mise_tools, user_without_groups
 
 VM_DIR = Path(__file__).resolve().parent.parent
+MISE_VERSION = "2026.8.4"
+MISE_SHA256 = "9cb1227dd27a11c0895374b8ea4e07fb9ff73c32451267d07f2ae84db07bda0e"
 
 packages = [
-    "base-devel",
+    "autoconf",
+    "automake",
     "bash",
+    "binutils",
+    "bison",
     "ca-certificates",
     "chromium",
     "curl",
     "docker",
     "docker-buildx",
+    "debugedit",
+    "fakeroot",
     "fd",
+    "file",
+    "findutils",
+    "flex",
     "fuse-overlayfs",
+    "gawk",
+    "gcc",
+    "gettext",
     "git",
+    "grep",
+    "groff",
+    "gzip",
     "iproute2",
     "iptables-nft",
     "jq",
+    "libtool",
+    "m4",
+    "make",
     "neovim",
-    "npm",
+    "patch",
+    "pkgconf",
     "ripgrep",
     "rootlesskit",
     "rsync",
+    "sed",
     "shadow",
     "slirp4netns",
-    "sudo",
+    "texinfo",
+    "which",
 ]
 
 pacman.packages(
@@ -38,11 +64,16 @@ pacman.packages(
 )
 
 server.user(
-    name="Ensure the Pi user has the expected home and shell",
+    name="Configure the unprivileged Pi user",
     user="pi",
     home="/home/pi",
     shell="/bin/bash",
     ensure_home=True,
+)
+user_without_groups(
+    name="Remove Pi from administrative groups",
+    user="pi",
+    groups=["wheel", "adm"],
 )
 
 files.put(
@@ -64,28 +95,32 @@ files.file(
     path="/etc/sudoers.d/orbstack",
     present=False,
 )
-server.shell(
-    name="Remove Pi from the administrative wheel group",
-    commands="if id -nG pi | tr ' ' '\\n' | grep -qx wheel; then gpasswd -d pi wheel; fi",
+pacman.packages(
+    name="Remove the base-devel metapackage and sudo",
+    packages=["base-devel", "sudo"],
+    present=False,
 )
 
-for path, mode in host.loop(
+for path, owner, mode in host.loop(
     [
-        ("/etc/pi-sandbox", "0755"),
-        ("/home/pi/.local/share/docker", "0700"),
-        ("/home/pi/.local/state", "0700"),
-        ("/home/pi/.pi/agent", "0700"),
-        ("/home/pi/.pi/agent/sessions", "0700"),
-        ("/home/pi/.config/systemd/user/default.target.wants", "0755"),
-        ("/mnt/pi-host", "0700"),
-        ("/mnt/pi-launch", "0700"),
-        ("/workspace", "0755"),
+        ("/etc/pi-sandbox", "root", "0755"),
+        ("/home/pi/.local/bin", "pi", "0755"),
+        # Rootless dockerd adds group execute while running.
+        ("/home/pi/.local/share/docker", "pi", "0710"),
+        ("/home/pi/.local/state", "pi", "0700"),
+        ("/home/pi/.pi/agent", "pi", "0700"),
+        ("/home/pi/.pi/agent/sessions", "pi", "0700"),
+        ("/mnt/pi-host", "root", "0700"),
+        ("/mnt/pi-launch", "root", "0700"),
+        ("/run/containerd", "pi", "0700"),
+        ("/run/docker", "pi", "0700"),
+        ("/var/lib/systemd/linger", "root", "0755"),
+        ("/workspace", "root", "0755"),
     ],
 ):
-    files.directory(path=path, user="pi" if path.startswith("/home/pi") else "root", group="pi" if path.startswith("/home/pi") else "root", mode=mode)
+    files.directory(path=path, user=owner, group=owner, mode=mode)
 
-# Remove configuration copied by the previous image-style provisioner. Runtime
-# clones project selected live host entries here before Pi starts.
+# Remove configuration copied by the superseded image-style provisioner.
 for path in host.loop(
     [
         "/home/pi/.pi/agent/bin",
@@ -117,24 +152,44 @@ for name in host.loop(
 ):
     files.file(path=f"/home/pi/.pi/agent/{name}", present=False)
 
-managed_files = {
+managed_scripts = {
     "network-lockdown.sh": "/usr/local/bin/pi-network-lockdown",
     "prepare-runtime.sh": "/usr/local/bin/pi-prepare-runtime",
-    "rootless-dockerd.sh": "/usr/local/bin/pi-rootless-dockerd",
     "guest-entrypoint.sh": "/usr/local/bin/pi-guest",
-    "chromium-headless.sh": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    "pi-sandbox-prepare.service": "/etc/systemd/system/pi-sandbox-prepare.service",
-    "pi-docker.service": "/home/pi/.config/systemd/user/pi-docker.service",
 }
-for source, destination in host.loop(managed_files.items()):
-    is_user_file = destination.startswith("/home/pi")
+for source, destination in host.loop(managed_scripts.items()):
     files.put(
         src=str(VM_DIR / source),
         dest=destination,
-        user="pi" if is_user_file else "root",
-        group="pi" if is_user_file else "root",
-        mode="0644" if source.endswith(".service") else "0755",
+        user="root",
+        group="root",
+        mode="0755",
     )
+
+files.put(
+    name="Install the headless Chromium compatibility launcher",
+    src=StringIO("#!/bin/sh\nexec /usr/bin/chromium --headless=new --no-sandbox --disable-dev-shm-usage \"$@\"\n"),
+    dest="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    user="root",
+    group="root",
+    mode="0755",
+)
+prepare_unit = files.put(
+    name="Install runtime sandbox preparation service",
+    src=str(VM_DIR / "pi-sandbox-prepare.service"),
+    dest="/etc/systemd/system/pi-sandbox-prepare.service",
+    user="root",
+    group="root",
+    mode="0644",
+)
+docker_unit = files.put(
+    name="Install rootless Docker user service",
+    src=str(VM_DIR / "pi-rootless-docker.service"),
+    dest="/home/pi/.config/systemd/user/pi-rootless-docker.service",
+    user="pi",
+    group="pi",
+    mode="0644",
+)
 
 files.put(
     name="Configure rootless Docker runtime directories",
@@ -142,13 +197,14 @@ files.put(
     dest="/etc/tmpfiles.d/pi-docker.conf",
     mode="0644",
 )
-server.shell(
-    name="Create rootless Docker runtime directories",
-    commands="systemd-tmpfiles --create /etc/tmpfiles.d/pi-docker.conf",
+files.put(
+    name="Enable the Pi user manager at boot",
+    src=StringIO(""),
+    dest="/var/lib/systemd/linger/pi",
+    mode="0644",
 )
 
-# Retire the old standalone service; runtime preparation now installs the host
-# exception and firewall atomically before Pi is allowed to start.
+# Retire units and launchers from earlier revisions.
 systemd.service(
     name="Disable the superseded firewall service",
     service="pi-network-lockdown.service",
@@ -156,48 +212,83 @@ systemd.service(
     enabled=False,
 )
 files.file(path="/etc/systemd/system/pi-network-lockdown.service", present=False)
+systemd.service(
+    name="Disable the superseded Docker user service",
+    service="pi-docker.service",
+    running=False,
+    enabled=False,
+    user_mode=True,
+    machine="pi@",
+)
+files.file(path="/home/pi/.config/systemd/user/pi-docker.service", present=False)
+files.file(path="/usr/local/bin/pi-rootless-dockerd", present=False)
 
+systemd.daemon_reload(
+    name="Reload changed system units",
+    _if=any_changed(prepare_unit),
+)
 systemd.service(
     name="Enable runtime sandbox preparation",
     service="pi-sandbox-prepare.service",
     running=False,
     enabled=True,
-    daemon_reload=True,
 )
 
-files.link(
-    name="Enable the rootless Docker user service",
-    path="/home/pi/.config/systemd/user/default.target.wants/pi-docker.service",
-    target="../pi-docker.service",
+pi_uid = host.get_fact(Users)["pi"]["uid"]
+systemd.service(
+    name="Start the Pi user manager",
+    service=f"user@{pi_uid}.service",
+    running=True,
+)
+systemd.daemon_reload(
+    name="Reload changed Pi user units",
+    user_mode=True,
+    machine="pi@",
+    _if=any_changed(docker_unit),
+)
+systemd.service(
+    name="Enable and start rootless Docker",
+    service="pi-rootless-docker.service",
+    running=True,
+    enabled=True,
+    user_mode=True,
+    machine="pi@",
+)
+systemd.service(
+    name="Restart rootless Docker after unit changes",
+    service="pi-rootless-docker.service",
+    restarted=True,
+    user_mode=True,
+    machine="pi@",
+    _if=any_changed(docker_unit),
+)
+
+# Mise has no built-in pyinfra operation. Install its pinned, checksummed binary,
+# then use local fact-driven operations to converge tools and npm packages.
+files.download(
+    name="Install mise",
+    src=f"https://github.com/jdx/mise/releases/download/v{MISE_VERSION}/mise-v{MISE_VERSION}-linux-arm64",
+    dest="/home/pi/.local/bin/mise",
     user="pi",
     group="pi",
+    mode="0755",
+    sha256sum=MISE_SHA256,
 )
-server.shell(
-    name="Enable the Pi user manager at boot",
-    commands="loginctl enable-linger pi",
+mise_tools(
+    name="Install or update mise-managed tools",
+    tools=[
+        "node@latest",
+        "bun@latest",
+        "rust@latest",
+        "uv@latest",
+        "python@latest",
+        "npm:@biomejs/biome@latest",
+    ],
 )
-
-# This is the explicit update operation. The persistent template retains all
-# package-manager caches, so unchanged tools are not downloaded again.
-server.shell(
-    name="Install or update mise-managed tools and Pi",
-    commands=r"""
-set -euo pipefail
-runuser -u pi -- env HOME=/home/pi bash -lc '
-  set -euo pipefail
-  if [[ ! -x "$HOME/.local/bin/mise" ]]; then
-    curl --proto "=https" --tlsv1.2 -fsSL https://mise.run | sh
-  fi
-  export PATH="$HOME/.local/bin:$PATH"
-  mise use --global node@latest bun@latest rust@latest uv@latest python@latest
-  mise use --global npm:@biomejs/biome@latest
-  mise exec node@latest -- npm install -g --ignore-scripts \
-    @earendil-works/pi-coding-agent@latest chrome-devtools-mcp@latest
-'
-""",
-)
-
-server.shell(
-    name="Reload and start the rootless Docker user service",
-    commands="systemctl --user --machine=pi@ daemon-reload && systemctl --user --machine=pi@ restart pi-docker.service",
+mise_npm_packages(
+    name="Install or update Pi and Chrome DevTools MCP",
+    packages=[
+        "@earendil-works/pi-coding-agent@latest",
+        "chrome-devtools-mcp@latest",
+    ],
 )

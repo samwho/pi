@@ -6,32 +6,39 @@ configuration are mounted from macOS, Git metadata is remounted read-only,
 sessions are kept in a separate profile/project directory, and Pi has rootless
 Docker and headless Chromium.
 
-A legacy Docker-on-OrbStack launcher remains available for comparison.
-
 ## Quick start
 
 ```bash
 # Create or incrementally update the persistent stopped template with PyInfra.
-~/.pi/agent/bin/pi-rebuild
+~/.pi/agent/bin/pi-update
 
 # From any project: clone the template, run Pi, then delete the clone on exit.
 ~/.pi/agent/bin/pi
 ```
 
-Despite its historical name, `pi-rebuild` does not recreate an existing
-template. PyInfra converges the persistent machine in place, retaining pacman,
-npm, mise, and container caches. It installs current Arch packages; the latest
-Node, Bun, Rust, uv, Python, and Biome through mise; Pi; and
+`pi-update` converges the persistent template in place with PyInfra, retaining
+pacman, npm, mise, and container caches. It installs current Arch packages; the
+latest Node, Bun, Rust, uv, Python, and Biome through mise; Pi; and
 `chrome-devtools-mcp`. Run it to update tools or apply changes under
 `vm/pyinfra/` and `vm/`. Host Pi configuration is mounted live at runtime and
 does not require an update.
+
+PyInfra's built-in operations manage pacman, users, files, downloads, and both
+system and user systemd services. Because PyInfra has no mise operation, this
+repository provides custom mise facts and operations in `vm/pyinfra/`. They
+resolve current upstream versions and only install tools or npm packages when
+the declared `latest` version has changed. The mise binary itself is a pinned,
+checksummed `files.download`, rather than a piped installer script. The remaining
+shell code is limited to OrbStack lifecycle orchestration and clone-time policy
+that depends on invocation-specific mounts and the allowed host IP; those
+states do not exist while PyInfra is converging the stopped template.
 
 Useful overrides:
 
 ```bash
 PI_VM_PROFILE=work pi                 # separate persistent session namespace
 PI_VM_HOST_IP=192.168.1.20 pi         # explicit allowed macOS address
-PI_VM_CPUS=6 PI_VM_MEMORY=8G pi-rebuild
+PI_VM_CPUS=6 PI_VM_MEMORY=8G pi-update
 ```
 
 `PI_VM_TEMPLATE`, `PI_VM_DISK`, and `PI_VM_STATE_ROOT` are also supported.
@@ -114,29 +121,14 @@ deliberately allowed credentials in the host Pi configuration.
 
 | Path | Responsibility |
 | --- | --- |
-| `agent/bin/pi` | Default OrbStack launcher wrapper. |
-| `agent/bin/pi-vm` | Clone lifecycle, selective mounts, host-IP policy, and Pi execution. |
-| `agent/bin/pi-rebuild` | Default template-rebuild wrapper. |
-| `agent/bin/pi-vm-rebuild` | Creates the template if absent and runs incremental PyInfra convergence. |
+| `agent/bin/pi` | Clone lifecycle, selective mounts, host-IP policy, and Pi execution. |
+| `agent/bin/pi-update` | Creates the template if absent and runs incremental PyInfra convergence. |
 | `vm/pyinfra/inventory.py` | Connects PyInfra to the template through OrbStack's built-in SSH server. |
-| `vm/pyinfra/deploy.py` | Declarative packages, users, files, services, and explicit tool updates. |
+| `vm/pyinfra/deploy.py` | Declarative packages, users, files, services, and tool state. |
+| `vm/pyinfra/facts.py` | Facts for installed and current upstream mise/npm versions. |
+| `vm/pyinfra/operations.py` | Declarative mise tool and mise-scoped npm operations. |
 | `vm/prepare-runtime.sh` | Projects live Pi config, protects Git metadata, and applies network policy. |
-| `vm/network-lockdown.sh` | Root-owned egress filtering. |
-| `vm/rootless-dockerd.sh` | Rootless Docker daemon. |
+| `vm/network-lockdown.sh` | Root-owned runtime egress filtering. |
+| `vm/pi-rootless-docker.service` | Declarative rootless Docker process configuration. |
 | `vm/guest-entrypoint.sh` | Waits for runtime policy and Docker, then starts Pi in `/workspace`. |
 | `agent/mcp.json` | Headless Chromium MCP configuration. |
-
-## Legacy Docker sandbox
-
-The previous container implementation is retained:
-
-```bash
-~/.pi/agent/bin/pi-docker-rebuild
-~/.pi/agent/bin/pi-docker
-~/.pi/agent/bin/pi-dind
-```
-
-`pi-docker` runs Pi as uid 1000 with capabilities dropped after installing its
-outer firewall. `pi-dind` additionally starts a separate, per-project rootless
-Docker daemon without exposing the host Docker socket. The implementation is in
-`docker/`, `agent/bin/pi-docker`, and `agent/bin/pi-docker-rebuild`.
