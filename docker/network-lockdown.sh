@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# This is an egress policy, not a general allowlist: public Internet access and
+# DNS remain available, while private, link-local, multicast, and reserved
+# destinations are rejected. The host's own LAN address is an explicit exception
+# so local Chrome DevTools can be reached without exposing the rest of the LAN.
 ipv4_private_ranges=(
 	0.0.0.0/8
 	10.0.0.0/8
@@ -13,8 +17,8 @@ ipv4_private_ranges=(
 	240.0.0.0/4
 )
 
-# Fedora's default iptables wrapper selects the legacy backend, which OrbStack
-# does not expose. Prefer the nft backend when the distribution provides it.
+# OrbStack exposes nftables rather than the legacy iptables kernel interface.
+# Prefer an nft-compatible wrapper on either Arch (/usr/bin) or Fedora (/usr/sbin).
 iptables_bin=iptables
 ip6tables_bin=ip6tables
 if [[ -x /usr/sbin/iptables-nft ]]; then
@@ -28,6 +32,7 @@ elif [[ -x /usr/bin/ip6tables-nft ]]; then
 	ip6tables_bin=/usr/bin/ip6tables-nft
 fi
 
+# Preserve loopback traffic before installing destination-based rejects.
 "$iptables_bin" -w -A OUTPUT -o lo -j ACCEPT
 "$iptables_bin" -w -A OUTPUT -d 127.0.0.0/8 -j ACCEPT
 
@@ -50,6 +55,8 @@ for host_lan_ip in "${host_lan_ips[@]}"; do
 done
 unset IFS
 
+# DNS is required to reach permitted public services. Permit only resolvers
+# configured for this container, on both UDP and TCP port 53.
 while read -r resolver; do
 	if [[ "$resolver" != *:* ]]; then
 		"$iptables_bin" -w -A OUTPUT -d "$resolver" -p udp --dport 53 -j ACCEPT
@@ -60,8 +67,9 @@ for range in "${ipv4_private_ranges[@]}"; do
 	"$iptables_bin" -w -A OUTPUT -d "$range" -j REJECT --reject-with icmp-net-unreachable
 done
 
-if "$ip6tables_bin" -w -L OUTPUT >/dev/null 2>&1; then
-	"$ip6tables_bin" -w -A OUTPUT -o lo -j ACCEPT
+# Some hosts do not expose IPv6 filtering. When available, apply the matching
+# private/link-local/multicast policy without making IPv6-less hosts fail.
+if "$ip6tables_bin" -w -L OUTPUT >/dev/null 2>&1; then	"$ip6tables_bin" -w -A OUTPUT -o lo -j ACCEPT
 	"$ip6tables_bin" -w -A OUTPUT -d ::1/128 -j ACCEPT
 	while read -r resolver; do
 		if [[ "$resolver" == *:* ]]; then

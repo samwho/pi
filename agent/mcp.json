@@ -8,7 +8,7 @@
         "chrome-devtools-mcp@latest",
         "--headless",
         "--isolated",
-        "--executablePath=/usr/bin/chromium-browser",
+        "--executablePath=/usr/bin/chromium",
         "--chrome-arg=--no-sandbox",
         "--chrome-arg=--disable-dev-shm-usage",
         "--allowUnrestrictedPaths"

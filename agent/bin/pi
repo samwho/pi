@@ -1,6 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
+# The official Arch image is amd64-only. PI_DOCKER_PLATFORM permits an explicit
+# override for testing a different image, but image and platform must agree.
 image="${PI_DOCKER_IMAGE:-pi-sandbox}"
 platform="${PI_DOCKER_PLATFORM:-linux/amd64}"
 
@@ -14,6 +16,9 @@ project_key="$(printf '%s' "$project_dir" | shasum -a 256 | cut -c1-16)"
 # Docker-in-Docker is opt-in: most Pi sessions do not need its cold-start cost.
 dind=0
 [[ "${PI_ENABLE_DIND:-}" == "1" ]] && dind=1
+# Sessions and credentials persist without granting the sandbox access to the
+# host's Pi home. Docker state/socket are project-scoped to prevent one project
+# from controlling another project's nested containers.
 sessions_volume="pi-agent-sessions-$project_key"
 docker_volume="pi-agent-docker-$project_key"
 docker_socket_volume="pi-agent-docker-socket-$project_key"
@@ -24,11 +29,13 @@ docker volume create "$sessions_volume" >/dev/null
 docker volume create "$runtime_volume" >/dev/null
 
 if (( dind )); then
+  # Do not create Docker resources at all for ordinary Pi sessions.
   docker volume create "$docker_volume" >/dev/null
   docker volume create "$docker_socket_volume" >/dev/null
 daemon_memory="${PI_DOCKER_DAEMON_MEMORY:-2g}"
 daemon_cpus="${PI_DOCKER_DAEMON_CPUS:-4}"
 daemon_pids="${PI_DOCKER_DAEMON_PIDS_LIMIT:-512}"
+# Recreate a stale daemon when its image, resources, or project changes.
 image_id="$(docker image inspect "$image" --format '{{.Id}}')"
 daemon_spec="$(printf '%s' "$image_id|$platform|$daemon_memory|$daemon_cpus|$daemon_pids|$project_dir" | shasum -a 256 | cut -d' ' -f1)"
 current_daemon_spec="$(docker container inspect "$daemon_container" --format '{{ index .Config.Labels "dev.pi.daemon.spec" }}' 2>/dev/null || true)"
@@ -48,6 +55,8 @@ if [[ -z "$current_daemon_spec" ]]; then
     daemon_mounts+=(--mount "type=bind,src=$project_dir/.git,dst=/workspace/.git,readonly")
   fi
 
+  # The daemon has no host Docker socket. It receives only the capabilities
+  # RootlessKit needs for a nested user/network namespace; --privileged is never used.
   if ! docker run -d --name "$daemon_container" --platform "$platform" \
     --read-only \
     --cap-drop=ALL \
@@ -96,6 +105,8 @@ if ! docker exec --user 1000:1000 "$daemon_container" docker info >/dev/null 2>&
 fi
 fi
 
+# The project is the only host directory writable by Pi. Git metadata is added
+# separately as read-only so status/diff/history work but commits and checkouts do not.
 mounts=(
   --mount "type=bind,src=$project_dir,dst=/workspace"
   --mount "type=volume,src=$runtime_volume,dst=/home/pi/.pi/state"
@@ -114,6 +125,8 @@ agent_memory="${PI_DOCKER_MEMORY:-2g}"
 # Pi creates a short-lived settings lock beside its image-baked configuration.
 # Keep the agent layer ephemeral but writable; mounting a volume here would hide
 # the image's /home/pi/.pi/agent contents.
+# The agent is constrained independently of the optional daemon. Writable tmpfs
+# locations are explicitly sized; no host configuration directory is mounted.
 agent_args=(
   run --rm -i --platform "$platform"
   --cap-drop=ALL
@@ -136,7 +149,7 @@ agent_args=(
   --tmpfs /home/pi/.local/state:rw,nosuid,nodev,size=64m,mode=0700,uid=1000,gid=1000
   # Package caches must be executable: npm/bun launch downloaded CLI scripts from them.
   --tmpfs /home/pi/.npm:rw,nosuid,nodev,exec,size=512m,mode=0700,uid=1000,gid=1000
-  # bunx stores downloaded MCP packages here; the root filesystem is read-only.
+  # bunx stores downloaded MCP packages here and executes their entry scripts.
   --tmpfs /home/pi/.bun:rw,nosuid,nodev,exec,size=512m,mode=0700,uid=1000,gid=1000
 )
 if [[ -t 1 ]]; then
@@ -157,6 +170,7 @@ elif command -v ip >/dev/null 2>&1; then
   host_lan_ips="$(ip -4 -o addr show scope global | awk '{ sub(/\/.*/, "", $4); print $4 }' | paste -sd, -)"
 fi
 
+# Preserve terminal capability hints without passing the host environment wholesale.
 terminal_env=(-e "TERM=$sandbox_term")
 if [[ -n "${COLORTERM:-}" ]]; then
   terminal_env+=(-e "COLORTERM=$COLORTERM")

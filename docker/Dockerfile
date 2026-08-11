@@ -4,6 +4,7 @@ FROM archlinux@sha256:a674898d53cc63b1af4023a468ccddc25ed9d7aecc3996f16171838a57
 
 # Keep the official Arch image's rolling-release update/install flow. Docker's
 # restricted build environment cannot use pacman's Landlock/alpm sandbox.
+# The Docker and RootlessKit packages are only used by the opt-in pi-dind mode.
 RUN sed -i 's/^#DisableSandbox/DisableSandbox/' /etc/pacman.conf \
   && pacman -Syu --noconfirm \
   && pacman -S --noconfirm --needed \
@@ -19,6 +20,8 @@ RUN mkdir -p "/Applications/Google Chrome.app/Contents/MacOS" \
      > "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
   && chmod 0755 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 
+# Pi never runs as root. The subordinate-ID ranges and setuid helpers are
+# required only when RootlessKit creates pi-dind's nested user namespace.
 RUN useradd --create-home --uid 1000 --shell /bin/bash pi \
   && printf 'pi:100000:65536\n' > /etc/subuid \
   && printf 'pi:100000:65536\n' > /etc/subgid \
@@ -27,6 +30,8 @@ RUN useradd --create-home --uid 1000 --shell /bin/bash pi \
   && chown -R pi:pi /home/pi /run/pi-docker /run/user/1000 /workspace \
   && chmod 4755 /usr/bin/newuidmap /usr/bin/newgidmap
 
+# Keep tool installations and Pi's immutable, image-baked configuration under
+# pi's home. Runtime credentials and sessions are mounted separately by pi.
 ENV HOME="/home/pi"
 ENV MISE_DATA_DIR="/home/pi/.local/share/mise"
 ENV MISE_TRUSTED_CONFIG_PATHS="/workspace"
@@ -52,12 +57,16 @@ RUN curl --proto '=https' --tlsv1.2 -fsSL https://mise.run | sh \
 
 USER root
 
+# Bake non-secret Pi configuration into the image. .dockerignore excludes
+# credentials and sessions; the launcher's named volumes supply mutable state.
 COPY --chown=pi:pi agent/ /home/pi/.pi/agent/
 COPY --chown=pi:pi agent/mcp.json /home/pi/.pi/agent/mcp.json
 COPY --chmod=0755 docker/entrypoint.sh /usr/local/bin/pi-entrypoint
 COPY --chmod=0755 docker/dockerd-entrypoint.sh /usr/local/bin/pi-dockerd-entrypoint
 COPY --chmod=0755 docker/network-lockdown.sh /usr/local/bin/pi-network-lockdown
 
+# Authentication and model metadata must survive ephemeral agent containers but
+# must not be image layers. These links resolve into the runtime state volume.
 RUN test ! -e /home/pi/.pi/agent/auth.json \
   && test ! -e /home/pi/.pi/agent/models-store.json \
   && ln -s /home/pi/.pi/state/auth.json /home/pi/.pi/agent/auth.json \
