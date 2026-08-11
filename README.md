@@ -3,8 +3,8 @@
 This repository launches Pi in a fresh, isolated OrbStack Arch Linux ARM64
 machine. The current project and a policy-controlled projection of the host Pi
 configuration are mounted from macOS, Git metadata is remounted read-only,
-and each project/profile gets a persistent VM with its own sessions and project
-dependency state. Pi has rootless Docker and headless Chromium.
+and each project/profile gets a pool of persistent VMs with their own sessions
+and project dependency state. Pi has rootless Docker and headless Chromium.
 
 ## Quick start
 
@@ -15,16 +15,18 @@ dependency state. Pi has rootless Docker and headless Chromium.
 # Preview the PyInfra changes without modifying the template.
 ~/.pi/agent/bin/pi-diff
 
-# From any project: start/reuse its VM, run Pi, then stop the VM on exit.
+# From any project: start/reuse an available VM, run Pi, then stop it on exit.
 ~/.pi/agent/bin/pi
 
-# Delete the persistent VM and all state inside it for the current project.
+# Delete all stopped VMs and their state for the current project/profile.
+# The command refuses to delete while any matching VM is active.
 ~/.pi/agent/bin/pi-delete
 ```
 
-A bare `pi` invocation resumes the most recent session for the current
-project/profile. Supplying arguments preserves Pi's normal CLI behavior; use
-`pi -c "..."` to continue with an initial prompt.
+A bare `pi` invocation uses the lowest available VM ordinal and resumes that
+VM's most recent session. If the first VM is running, another invocation uses
+ordinal 2, then 3, and so on. Supplying arguments preserves Pi's normal CLI
+behavior; use `pi -c "..."` to continue with an initial prompt.
 
 `pi-diff` uses Rich to render only operations that would change and includes
 syntax-highlighted unified diffs for managed files, avoiding PyInfra's
@@ -70,9 +72,9 @@ PI_VM_CPUS=6 PI_VM_MEMORY=8G pi-update
 
 ```text
 stopped pi-template (Arch ARM64, provisioned)
-        │ clone once per project/profile
+        │ clone once per project/profile ordinal
         ▼
-persistent isolated project VM
+lowest available persistent project VM (…-1, …-2, …)
   ├─ project mounted read/write at /workspace
   ├─ /workspace/.git covered by a read-only bind mount
   ├─ Linux-native project dependencies in the VM disk
@@ -83,15 +85,16 @@ persistent isolated project VM
   └─ headless Chromium and Chrome DevTools MCP
         │ Pi exits
         ▼
-same VM stopped; state retained
+same VM ordinal stopped; state retained
         │ pi-delete
         ▼
-VM and its state deleted
+all stopped project/profile VMs and their state deleted
 ```
 
-OrbStack clones are copy-on-demand and start stopped. The launcher clones a
-project/profile VM the first time, then reuses it on later starts. The only host
-paths mounted into the persistent VM are:
+OrbStack clones are copy-on-demand and start stopped. The launcher allocates
+the lowest ordinal that is not running, clones it on first use, and reuses its
+state on later starts. Allocation is locked so simultaneous launchers cannot
+claim the same ordinal. The only host paths mounted into each persistent VM are:
 
 - the current project at `/workspace`;
 - the host Pi agent directory at `/mnt/pi-host` for live configuration
@@ -155,15 +158,16 @@ Pi can intentionally modify every file in the mounted project except `.git`,
 can reach public Internet services, and receives the live host credentials
 mounted into its configuration. Any credential visible to an Internet-enabled
 agent can be exfiltrated. It can also modify the explicitly read-write host Pi
-state. Use separate `PI_VM_PROFILE` values for session isolation and keep only
-deliberately allowed credentials in the host Pi configuration.
+state. Concurrent ordinal VMs isolate Pi session and dependency state, while
+`PI_VM_PROFILE` provides separate persistent VM pools. Keep only deliberately
+allowed credentials in the host Pi configuration.
 
 ## Files
 
 | Path | Responsibility |
 | --- | --- |
 | `agent/bin/pi` | Persistent VM lifecycle, selective mounts, and Pi execution. |
-| `agent/bin/pi-delete` | Deletes the persistent VM and its in-VM state for the current project/profile. |
+| `agent/bin/pi-delete` | Deletes all persistent VMs and in-VM state for the current project/profile, refusing while any are active. |
 | `agent/bin/pi-update` | Creates the template if absent and runs incremental PyInfra convergence. |
 | `agent/bin/pi-diff` | Starts the template if necessary and previews PyInfra operations and file diffs. |
 | `pyproject.toml`, `uv.lock` | Locked Python/PyInfra project used by updates and editor tooling. |

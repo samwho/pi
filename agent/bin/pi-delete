@@ -10,16 +10,56 @@ if [[ ! "$profile" =~ ^[A-Za-z0-9_.-]+$ ]]; then
 fi
 
 profile_key="$(printf '%s' "$profile" | shasum -a 256 | cut -c1-8)"
-machine="pi-${project_key}-${profile_key}"
+machine_base="pi-${project_key}-${profile_key}"
 state_root="${PI_VM_STATE_ROOT:-$HOME/.local/share/pi-vm}"
-launch_dir="$state_root/runtime/launch-$machine"
+runtime_root="$state_root/runtime"
+allocation_lock="$runtime_root/allocation-$machine_base.lock"
+lock_held=0
 
-if ! orb info "$machine" >/dev/null 2>&1; then
-  echo "No Pi VM exists for $project_dir (profile: $profile)."
+cleanup() {
+  if (( lock_held )); then
+    rm -f "$allocation_lock"
+  fi
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+mkdir -p "$runtime_root"
+chmod 0700 "$state_root" "$runtime_root" 2>/dev/null || true
+until shlock -f "$allocation_lock" -p $$ >/dev/null 2>&1; do
+  sleep 0.1
+done
+lock_held=1
+
+machines=()
+while IFS= read -r candidate; do
+  if [[ "$candidate" == "$machine_base" || \
+        "$candidate" =~ ^${machine_base}-[1-9][0-9]*$ ]]; then
+    machines+=("$candidate")
+  fi
+done < <(orbctl list --quiet)
+
+if (( ${#machines[@]} == 0 )); then
+  echo "No Pi VMs exist for $project_dir (profile: $profile)."
   exit 0
 fi
 
-echo "Deleting $machine..."
-orb delete -f "$machine" >/dev/null
-rm -rf "$launch_dir"
-echo "Deleted $machine."
+running_machines=()
+for machine in "${machines[@]}"; do
+  if orbctl list --running --quiet | grep -Fxq "$machine"; then
+    running_machines+=("$machine")
+  fi
+done
+if (( ${#running_machines[@]} > 0 )); then
+  echo "Refusing to delete active Pi VM(s): ${running_machines[*]}" >&2
+  echo "Exit those Pi sessions and try again." >&2
+  exit 1
+fi
+
+for machine in "${machines[@]}"; do
+  echo "Deleting $machine..."
+  orb delete -f "$machine" >/dev/null
+  rm -rf "$runtime_root/launch-$machine"
+done
+echo "Deleted ${#machines[@]} Pi VM(s)."

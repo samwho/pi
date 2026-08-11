@@ -25,10 +25,69 @@ fi
 state_root="${PI_VM_STATE_ROOT:-$HOME/.local/share/pi-vm}"
 runtime_root="$state_root/runtime"
 profile_key="$(printf '%s' "$profile" | shasum -a 256 | cut -c1-8)"
-machine="pi-${project_key}-${profile_key}"
+machine_base="pi-${project_key}-${profile_key}"
+allocation_lock="$runtime_root/allocation-$machine_base.lock"
+machine=""
+launch_dir=""
+stop_on_exit=0
+allocation_lock_held=0
+
+cleanup() {
+  if (( stop_on_exit )); then
+    orb stop "$machine" >/dev/null 2>&1 || true
+  fi
+  if (( allocation_lock_held )); then
+    rm -f "$allocation_lock"
+  fi
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+mkdir -p "$runtime_root"
+chmod 0700 "$state_root" "$runtime_root" 2>/dev/null || true
+
+# Hold allocation through startup so simultaneous launchers cannot select the
+# same stopped VM or both try to create the same ordinal.
+until shlock -f "$allocation_lock" -p $$ >/dev/null 2>&1; do
+  sleep 0.1
+done
+allocation_lock_held=1
+
+machine_is_running() {
+  orb info "$1" >/dev/null 2>&1 && \
+    orbctl list --running --quiet | grep -Fxq "$1"
+}
+
+# Migrate the original unnumbered VM when possible. If it is currently running,
+# reserve ordinal 1 for it; a later launch will rename and reuse it after it stops.
+ordinal=1
+first_machine="$machine_base-1"
+if orb info "$machine_base" >/dev/null 2>&1; then
+  if orb info "$first_machine" >/dev/null 2>&1; then
+    echo "Both legacy VM $machine_base and ordinal VM $first_machine exist; refusing ambiguous allocation." >&2
+    echo "Remove the unwanted VM manually, then run Pi again." >&2
+    exit 1
+  elif machine_is_running "$machine_base"; then
+    ordinal=2
+  else
+    orb rename "$machine_base" "$first_machine" >/dev/null
+    rm -rf "$runtime_root/launch-$machine_base"
+  fi
+fi
+
+while :; do
+  candidate="$machine_base-$ordinal"
+  if ! machine_is_running "$candidate"; then
+    machine="$candidate"
+    break
+  fi
+  ((ordinal += 1))
+done
+
 launch_dir="$runtime_root/launch-$machine"
-mkdir -p "$runtime_root" "$launch_dir"
-chmod 0700 "$state_root" "$runtime_root" "$launch_dir" 2>/dev/null || true
+mkdir -p "$launch_dir"
+chmod 0700 "$launch_dir" 2>/dev/null || true
 
 # The runtime launch directory is mounted so the guest can verify that this
 # invocation has supplied its required runtime mounts. Record the host's
@@ -56,19 +115,7 @@ if [[ -z "$host_ips" ]]; then
 fi
 printf '%s\n' "$host_ips" >"$launch_dir/host-ips"
 
-cleanup() {
-  orb stop "$machine" >/dev/null 2>&1 || true
-}
-trap cleanup EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
-
-if orb info "$machine" >/dev/null 2>&1; then
-  if orbctl list --running --quiet | grep -Fxq "$machine"; then
-    echo "$machine is already running for this directory and profile." >&2
-    exit 1
-  fi
-else
+if ! orb info "$machine" >/dev/null 2>&1; then
   # The VM is persistent per project/profile. Its sessions, dependency tree,
   # package store, and other mutable state live on its disk, not on the host.
   orb clone "$template" "$machine" >/dev/null
@@ -82,7 +129,10 @@ for path in "$project_dir" "$host_config" "$launch_dir"; do
 done
 orb config set "machine.$machine.mounts" \
   "$project_dir:/workspace,$host_config:/mnt/pi-host,$launch_dir:/mnt/pi-launch"
+stop_on_exit=1
 orb start "$machine" >/dev/null
+rm -f "$allocation_lock"
+allocation_lock_held=0
 
 sandbox_term="${TERM:-xterm-256color}"
 [[ "$sandbox_term" == *ghostty* ]] && sandbox_term=xterm-256color
