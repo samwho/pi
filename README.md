@@ -28,7 +28,9 @@ system and user systemd services. Because PyInfra has no mise operation, this
 repository provides custom mise facts and operations in `vm/pyinfra/`. They
 resolve current upstream versions and only install tools or npm packages when
 the declared `latest` version has changed. The mise binary itself is a pinned,
-checksummed `files.download`, rather than a piped installer script. The remaining
+checksummed `files.download`, rather than a piped installer script. The PyInfra
+Python environment is locked by uv; run `uv sync` after cloning to give editors
+and command-line tools the same dependency environment. The remaining
 shell code is limited to OrbStack lifecycle orchestration and clone-time policy
 that depends on invocation-specific mounts and the allowed host IP; those
 states do not exist while PyInfra is converging the stopped template.
@@ -123,6 +125,7 @@ deliberately allowed credentials in the host Pi configuration.
 | --- | --- |
 | `agent/bin/pi` | Clone lifecycle, selective mounts, host-IP policy, and Pi execution. |
 | `agent/bin/pi-update` | Creates the template if absent and runs incremental PyInfra convergence. |
+| `pyproject.toml`, `uv.lock` | Locked Python/PyInfra project used by updates and editor tooling. |
 | `vm/pyinfra/inventory.py` | Connects PyInfra to the template through OrbStack's built-in SSH server. |
 | `vm/pyinfra/deploy.py` | Declarative packages, users, files, services, and tool state. |
 | `vm/pyinfra/facts.py` | Facts for installed and current upstream mise/npm versions. |

@@ -1,7 +1,7 @@
 from io import StringIO
 from pathlib import Path
 
-from pyinfra import host
+from pyinfra.context import host
 from pyinfra.facts.server import Users
 from pyinfra.operations import files, pacman, server, systemd
 from pyinfra.operations.util import any_changed

@@ -3,7 +3,6 @@ set -euo pipefail
 
 template="${PI_VM_TEMPLATE:-pi-template}"
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
-pyinfra_version="${PI_PYINFRA_VERSION:-3.10.0}"
 cpus="${PI_VM_CPUS:-4}"
 memory="${PI_VM_MEMORY:-4G}"
 disk="${PI_VM_DISK:-64G}"
@@ -51,11 +50,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# PyInfra connects through OrbStack's built-in localhost-only SSH server. uvx
-# caches PyInfra and its dependencies; the template keeps all guest-side caches.
+# PyInfra connects through OrbStack's built-in localhost-only SSH server. uv
+# uses the repository lockfile and environment; guest-side caches remain in the
+# persistent template.
 PI_VM_TEMPLATE="$template" \
   mise exec -q uv@latest -- \
-  uvx --from "pyinfra==$pyinfra_version" pyinfra -y \
+  uv run --project "$repo_root" pyinfra -y \
     --chdir "$repo_root/vm/pyinfra" \
     inventory.py deploy.py
 

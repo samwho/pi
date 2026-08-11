@@ -1,5 +1,6 @@
-from pyinfra import host
-from pyinfra.api import QuoteString, StringCommand, operation
+from pyinfra.api.command import QuoteString, StringCommand
+from pyinfra.api.operation import operation
+from pyinfra.context import host
 from pyinfra.facts.server import Users
 
 from facts import (

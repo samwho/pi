@@ -1,7 +1,7 @@
 import json
 import shlex
 
-from pyinfra.api import FactBase
+from pyinfra.api.facts import FactBase
 
 MISE = "/home/pi/.local/bin/mise"
 NODE_BIN = "/home/pi/.local/share/mise/installs/node/latest/bin"
