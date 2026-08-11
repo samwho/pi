@@ -152,6 +152,15 @@ for source, destination in host.loop(managed_scripts.items()):
     )
 
 files.put(
+    name="Install the VM-specific Pi system prompt",
+    src=str(VM_DIR / "SYSTEM.md"),
+    dest="/home/pi/.pi/agent/SYSTEM.md",
+    user="pi",
+    group="pi",
+    mode="0644",
+)
+
+files.put(
     name="Install the headless Chromium compatibility launcher",
     src=StringIO(
         "#!/bin/sh\n"

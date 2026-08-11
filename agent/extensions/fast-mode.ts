@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -92,8 +92,19 @@ function saveEnabled(enabled: boolean): void {
 
   mkdirSync(dirname(path), { recursive: true });
   const temporaryPath = `${path}.tmp-${process.pid}`;
-  writeFileSync(temporaryPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
-  renameSync(temporaryPath, path);
+  const serialized = `${JSON.stringify(settings, null, 2)}\n`;
+  writeFileSync(temporaryPath, serialized, "utf8");
+  try {
+    renameSync(temporaryPath, path);
+  } catch (error) {
+    // A settings file projected into the VM as an individual bind mount cannot
+    // be replaced with rename(2). Fall back to updating that mounted file in
+    // place; normal filesystems retain the safer atomic replacement above.
+    if ((error as NodeJS.ErrnoException).code !== "EBUSY") throw error;
+    writeFileSync(path, serialized, "utf8");
+  } finally {
+    rmSync(temporaryPath, { force: true });
+  }
 }
 
 function normalizeShortcuts(value: unknown): string[] {

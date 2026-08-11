@@ -1,3 +1,5 @@
+agent/pi-pretty
+
 # Credentials and private configuration
 agent/auth.json
 agent/trust.json

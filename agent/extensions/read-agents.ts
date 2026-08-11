@@ -2,8 +2,8 @@ import { constants } from "node:fs";
 import { access } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
-import type { ExtensionAPI, ReadToolInput, SessionEntry } from "@earendil-works/pi-coding-agent";
-import { createReadTool, createReadToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
+import { isReadToolResult, isToolCallEventType } from "@earendil-works/pi-coding-agent";
 
 const AGENTS_FILE_NAME = "AGENTS.md";
 
@@ -107,51 +107,52 @@ async function fileExists(filePath: string): Promise<boolean> {
 
 export default function (pi: ExtensionAPI) {
 	const completedReadPaths = new Set<string>();
-	const nativeRead = createReadToolDefinition(process.cwd());
 
-	pi.registerTool({
-		name: "read",
-		label: "read",
-		description: nativeRead.description,
-		promptSnippet: nativeRead.promptSnippet,
-		promptGuidelines: nativeRead.promptGuidelines,
-		parameters: nativeRead.parameters,
-		executionMode: "sequential",
-		async execute(toolCallId, params: ReadToolInput, signal, onUpdate, ctx) {
-			const targetPath = normalizePath(ctx.cwd, params.path);
-			const originalRead = createReadTool(ctx.cwd);
-			const sessionReadPaths = getReadPaths(ctx.sessionManager.getBranch(), ctx.cwd);
-			const knownReadPaths = new Set([...sessionReadPaths, ...completedReadPaths]);
-			const unreadAgentsFiles: string[] = [];
+	// Gate every read implementation, including tools supplied by other extensions.
+	// This keeps the policy layered on top of wrappers such as pi-pretty instead of
+	// competing with them for ownership of the `read` tool name.
+	pi.on("tool_call", async (event, ctx) => {
+		if (!isToolCallEventType("read", event)) {
+			return;
+		}
 
-			for (const agentsPath of getAncestorAgentsFiles(ctx.cwd, targetPath)) {
-				if (knownReadPaths.has(agentsPath)) {
-					continue;
-				}
-				if (await fileExists(agentsPath)) {
-					unreadAgentsFiles.push(agentsPath);
-				}
+		const targetPath = normalizePath(ctx.cwd, event.input.path);
+		const sessionReadPaths = getReadPaths(ctx.sessionManager.getBranch(), ctx.cwd);
+		const knownReadPaths = new Set([...sessionReadPaths, ...completedReadPaths]);
+		const unreadAgentsFiles: string[] = [];
+
+		for (const agentsPath of getAncestorAgentsFiles(ctx.cwd, targetPath)) {
+			if (knownReadPaths.has(agentsPath)) {
+				continue;
 			}
-
-			if (unreadAgentsFiles.length > 0) {
-				const paths = unreadAgentsFiles.map((path) => `- ${path}`).join("\n");
-				return {
-					content: [
-						{
-							type: "text",
-							text:
-								`Read these AGENTS.md files before retrying ${targetPath}. ` +
-								`Read them in the order listed, then retry the original file:\n${paths}`,
-						},
-					],
-					details: {},
-					isError: true,
-				};
+			if (await fileExists(agentsPath)) {
+				unreadAgentsFiles.push(agentsPath);
 			}
+		}
 
-			const result = await originalRead.execute(toolCallId, params, signal, onUpdate);
-			completedReadPaths.add(targetPath);
-			return result;
-		},
+		if (unreadAgentsFiles.length === 0) {
+			return;
+		}
+
+		const paths = unreadAgentsFiles.map((path) => `- ${path}`).join("\n");
+		return {
+			block: true,
+			reason:
+				`Read these AGENTS.md files before retrying ${targetPath}. ` +
+				`Read them in the order listed, then retry the original file:\n${paths}`,
+		};
+	});
+
+	// Record successful reads after the selected implementation has run. This
+	// works for the built-in tool and for any extension that overrides it.
+	pi.on("tool_result", (event, ctx) => {
+		if (!isReadToolResult(event) || event.isError) {
+			return;
+		}
+
+		const path = event.input.path;
+		if (typeof path === "string") {
+			completedReadPaths.add(normalizePath(ctx.cwd, path));
+		}
 	});
 }

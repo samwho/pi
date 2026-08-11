@@ -108,7 +108,9 @@ to manifests, lockfiles, or toolchain files invalidate the dependency stamp; no
 repository name or dependency version is encoded in the VM.
 
 A root-owned boot service projects each top-level host Pi configuration entry
-except `sessions/` and the per-VM cache files into `~/.pi/agent`.
+except `SYSTEM.md`, `sessions/`, and the per-VM cache files into `~/.pi/agent`.
+The VM image supplies its own `SYSTEM.md`; the host's `APPEND_SYSTEM.md` is
+still projected read-only and loads in both environments.
 `settings.json`, `auth.json`, OAuth/model state, and trust are read-write.
 `mcp-cache.json` and `mcp-npx-cache.json` remain on the VM disk because their
 atomic replacement is incompatible with projecting individual host files as
@@ -169,6 +171,7 @@ deliberately allowed credentials in the host Pi configuration.
 | `vm/pyinfra/deploy.py` | Declarative packages, users, files, services, and tool state. |
 | `vm/pyinfra/facts.py` | Facts for installed and current upstream mise/npm versions. |
 | `vm/pyinfra/operations.py` | Declarative mise tool and mise-scoped npm operations. |
+| `vm/SYSTEM.md` | VM-only copy of Pi's default system prompt with low-memory and host-server guidance. |
 | `vm/prepare-runtime.sh` | Projects live Pi config, protects Git metadata, overlays native dependencies, and applies network policy. |
 | `vm/project-dependencies.sh` | Detects project package-manager inputs and installs Linux-native dependencies from the repository's own lockfiles. |
 | `vm/network-lockdown.sh` | Root-owned runtime egress filtering. |

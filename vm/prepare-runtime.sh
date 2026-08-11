@@ -53,7 +53,9 @@ is_rw_entry() {
 while IFS= read -r -d '' source; do
   name="$(basename "$source")"
   case "$name" in
-    sessions|mcp-cache.json|mcp-npx-cache.json|pi-pretty) continue ;;
+    # SYSTEM.md is owned by the VM image. Do not let a host-global custom
+    # prompt replace the VM-specific prompt.
+    SYSTEM.md|sessions|mcp-cache.json|mcp-npx-cache.json|pi-pretty) continue ;;
   esac
   destination="$agent_dir/$name"
 
