@@ -31,16 +31,29 @@ if [[ -e /workspace/.git ]]; then
   mount -o remount,bind,ro /workspace/.git
 fi
 
-# Project live host configuration into the machine-local Pi directory. Mutable
-# Pi state is writable by explicit policy; every other top-level config entry is
-# read-only. Host sessions and atomic-write caches are never projected.
-rw_entries=(
+# Project live host configuration into the machine-local Pi directory. Settings
+# and credentials are copied at each VM launch instead of bind-mounted: Pi saves
+# them atomically, and a file bind mount becomes stale when its host source is
+# replaced. Other mutable state is writable by explicit policy; every remaining
+# top-level config entry is read-only. Host sessions and atomic-write caches are
+# never projected.
+launch_snapshot_entries=(
   auth.json
+  settings.json
+)
+rw_entries=(
   models-store.json
   oauth.json
-  settings.json
   trust.json
 )
+
+is_launch_snapshot_entry() {
+  local candidate="$1" entry
+  for entry in "${launch_snapshot_entries[@]}"; do
+    [[ "$candidate" == "$entry" ]] && return 0
+  done
+  return 1
+}
 
 is_rw_entry() {
   local candidate="$1" entry
@@ -59,7 +72,12 @@ while IFS= read -r -d '' source; do
   esac
   destination="$agent_dir/$name"
 
-  if [[ -d "$source" ]]; then
+  if [[ -f "$source" ]] && is_launch_snapshot_entry "$name"; then
+    # Keep the VM-local copy writable so Pi can safely replace it with rename(2).
+    # Host configuration remains the source of truth on the next VM launch.
+    install -o pi -g pi -m 0600 "$source" "$destination"
+    continue
+  elif [[ -d "$source" ]]; then
     mkdir -p "$destination"
   elif [[ -f "$source" ]]; then
     install -o pi -g pi -m 0600 /dev/null "$destination"

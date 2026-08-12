@@ -113,19 +113,23 @@ repository name or dependency version is encoded in the VM.
 A root-owned boot service projects each top-level host Pi configuration entry
 except `SYSTEM.md`, `sessions/`, and the per-VM cache files into `~/.pi/agent`.
 The VM image supplies its own `SYSTEM.md`; the host's `APPEND_SYSTEM.md` is
-still projected read-only and loads in both environments.
-`settings.json`, `auth.json`, OAuth/model state, and trust are read-write.
-`mcp-cache.json` and `mcp-npx-cache.json` remain on the VM disk because their
-atomic replacement is incompatible with projecting individual host files as
-mount points. All other entries—including extensions, skills, prompts, themes,
-MCP configuration, and npm/git package directories—are bind-mounted read-only.
-The original source mount is then covered so Pi cannot traverse into host
-sessions or unselected files.
+still projected read-only and loads in both environments. At every VM launch,
+`settings.json` and `auth.json` are copied into VM-local storage rather than
+bind-mounted. Pi can therefore atomically replace them without creating stale
+file mounts; host copies are the defaults for the next launch, and VM changes
+to those two files are not synced back. OAuth/model state and trust remain
+read-write mounts. `mcp-cache.json` and `mcp-npx-cache.json` remain on the VM
+disk because their atomic replacement is incompatible with projecting
+individual host files as mount points. All other entries—including extensions,
+skills, prompts, themes, MCP configuration, and npm/git package directories—are
+bind-mounted read-only. The original source mount is then covered so Pi cannot
+traverse into host sessions or unselected files.
 
-Changes to projected host files and directories are visible immediately. The
-read-write entries can also be changed, corrupted, or deleted by the agent; this
-is an explicit pragmatic concession. The host's general filesystem, host Pi
-sessions, SSH agent, USB devices, sound, and normal macOS command integration
+Changes to projected host files and directories are visible immediately.
+`settings.json` and `auth.json` instead refresh on the next VM launch. The
+read-write entries can also be changed, corrupted, or deleted by the agent;
+this is an explicit pragmatic concession. The host's general filesystem, host
+Pi sessions, SSH agent, USB devices, sound, and normal macOS command integration
 are not shared.
 
 ## Network policy
