@@ -10,6 +10,19 @@ export PATH="/home/pi/.local/share/mise/installs/node/latest/bin:/home/pi/.local
 export MISE_DATA_DIR=/home/pi/.local/share/mise
 export MISE_TRUSTED_CONFIG_PATHS=/workspace
 
+# Load the host-global Pi secrets file. This is copied into the persistent
+# template by pi-update, then sourced by every guest Pi process. MCP children
+# inherit these variables; the agent can therefore use the configured APIs.
+if [[ -f /home/pi/.pi/.env ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source /home/pi/.pi/.env
+  set +a
+fi
+
+export FACELIFT_THEME=gruvbox-dark-hard
+export FACELIFT_MAX_PREVIEW_LINES=10
+
 # The root-owned boot service applies mount and network policy before the agent
 # may run. A missing marker means provisioning or runtime preparation failed.
 for _ in $(seq 1 120); do

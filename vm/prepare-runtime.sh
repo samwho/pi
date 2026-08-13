@@ -37,6 +37,9 @@ fi
 # replaced. Other mutable state is writable by explicit policy; every remaining
 # top-level config entry is read-only. Host sessions and atomic-write caches are
 # never projected.
+#
+# MCP configuration is platform-specific. The host's mcp.json is for macOS;
+# mcp-linux.json is mounted as the VM's mcp.json below.
 launch_snapshot_entries=(
   auth.json
   settings.json
@@ -68,7 +71,7 @@ while IFS= read -r -d '' source; do
   case "$name" in
     # SYSTEM.md is owned by the VM image. Do not let a host-global custom
     # prompt replace the VM-specific prompt.
-    SYSTEM.md|sessions|mcp-cache.json|mcp-npx-cache.json|pi-pretty) continue ;;
+    SYSTEM.md|sessions|mcp.json|mcp-linux.json|mcp-cache.json|mcp-npx-cache.json|pi-pretty) continue ;;
   esac
   destination="$agent_dir/$name"
 
@@ -92,11 +95,25 @@ while IFS= read -r -d '' source; do
   fi
 done < <(find "$host_config" -mindepth 1 -maxdepth 1 -print0)
 
+# Replace the platform-specific host config with the Linux VM config while
+# keeping it live and read-only like the other projected configuration.
+linux_mcp="$host_config/mcp-linux.json"
+if [[ ! -f "$linux_mcp" ]]; then
+  echo "Linux MCP configuration is missing: $linux_mcp" >&2
+  exit 1
+fi
+install -o pi -g pi -m 0644 /dev/null "$agent_dir/mcp.json"
+mount --bind "$linux_mcp" "$agent_dir/mcp.json"
+mount -o remount,bind,ro "$agent_dir/mcp.json"
+
 # The source mount contains host sessions, so hide it after establishing the
 # selected bind mounts. The unprivileged agent can only see the projection.
-mkdir -p /run/pi-hidden-host-config
+mkdir -p /run/pi-hidden-host-config /run/pi-hidden-launch
 mount --bind /run/pi-hidden-host-config "$host_config"
 
+# Apply the firewall while host-ips is still available, then hide the launch
+# mount so the agent cannot read host-ips.
 /usr/local/bin/pi-network-lockdown
+mount --bind /run/pi-hidden-launch "$launch_config"
 touch "$ready_file"
 chmod 0644 "$ready_file"

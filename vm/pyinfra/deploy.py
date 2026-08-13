@@ -28,12 +28,14 @@ packages = [
     "fd",
     "file",
     "findutils",
+    "firefox",
     "flex",
     "fuse-overlayfs",
     "gawk",
     "gcc",
     "gettext",
     "git",
+    "github-cli",
     "grep",
     "groff",
     "gzip",
@@ -111,10 +113,18 @@ pacman.packages(
 
 for path, owner, mode in host.loop(
     [
+        ("/home/pi/.local", "pi", "0700"),
+        ("/home/pi/.local/share", "pi", "0700"),
         ("/home/pi/.local/bin", "pi", "0755"),
+        # Mise and its Sigstore verifier create state below these directories as pi.
+        ("/home/pi/.config/mise", "pi", "0700"),
+        ("/home/pi/.local/share/mise", "pi", "0700"),
+        ("/home/pi/.cache/mise", "pi", "0700"),
+        ("/home/pi/.cache/sigstore-rust", "pi", "0700"),
         # Rootless dockerd adds group execute while running.
         ("/home/pi/.local/share/docker", "pi", "0710"),
         ("/home/pi/.local/state", "pi", "0700"),
+        ("/home/pi/.cache", "pi", "0700"),
         ("/home/pi/.cache/pnpm", "pi", "0700"),
         ("/home/pi/.pi/agent", "pi", "0700"),
         ("/home/pi/.pi/agent/sessions", "pi", "0700"),
@@ -270,5 +280,14 @@ mise_npm_packages(
     packages=[
         "@earendil-works/pi-coding-agent@latest",
         "chrome-devtools-mcp@latest",
+    ],
+)
+server.shell(
+    name="Remove Firefox DevTools MCP",
+    commands=[
+        "runuser -u pi -- env HOME=/home/pi "
+        "PATH=/home/pi/.local/share/mise/installs/node/latest/bin:/usr/bin "
+        "/home/pi/.local/share/mise/installs/node/latest/bin/npm uninstall --global "
+        "@mozilla/firefox-devtools-mcp",
     ],
 )

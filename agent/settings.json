@@ -3,7 +3,7 @@
   "theme": "dark",
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-5.6-terra",
-  "defaultThinkingLevel": "max",
+  "defaultThinkingLevel": "medium",
   "tuiMode": "regular",
   "fullscreenScrollbar": "hidden",
   "defaultProjectTrust": "ask",
@@ -19,7 +19,7 @@
     "git:github.com/badlogic/pi-skills",
     "npm:pi-mcp-adapter",
     "npm:@pi-plugins/usage",
-    "npm:@heyhuynhgiabuu/pi-pretty",
-    "npm:pi-background-tasks"
+    "npm:@99percentpeople/pi-background-tasks",
+    "npm:@wierdbytes/pi-facelift"
   ]
 }

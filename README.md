@@ -33,10 +33,20 @@ syntax-highlighted unified diffs for managed files, avoiding PyInfra's
 full-width all-operations table.
 `pi-update` converges the persistent template in place with PyInfra, retaining
 pacman, npm, mise, and container caches. It installs current Arch packages; the
-latest Node, Bun, Rust, uv, Python, and Biome through mise; Pi; and
-`chrome-devtools-mcp`. Run it to update tools or apply changes under
+latest Node, Bun, Rust, uv, Python, and Biome through mise; Pi and `chrome-devtools-mcp`. Run it to update tools or apply changes under
 `vm/pyinfra/` and `vm/`. Host Pi configuration is mounted live at runtime and
-does not require an update.
+does not require an update. The host-global `~/.pi/.env`, when present, is
+copied into the persistent `pi-template` at `/home/pi/.pi/.env` by
+`pi-update`; every VM's `pi` entrypoint sources that file. It is not related to
+or loaded from the project directory's `.env`.
+
+## GitHub CLI authentication
+
+The VM installs Arch's `github-cli` package, which provides the `gh` command.
+For noninteractive authentication, add `GH_TOKEN=github_pat_...` to the
+ignored host-global `~/.pi/.env`. Grant only the repository permissions needed
+for the tasks. Run `~/.pi/agent/bin/pi-update` after changing that file so the
+template copy is refreshed.
 
 PyInfra's built-in operations manage pacman, users, files, downloads, and both
 system and user systemd services. Because PyInfra has no mise operation, this
@@ -123,13 +133,17 @@ disk because their atomic replacement is incompatible with projecting
 individual host files as mount points. All other entries—including extensions,
 skills, prompts, themes, MCP configuration, and npm/git package directories—are
 bind-mounted read-only. The original source mount is then covered so Pi cannot
-traverse into host sessions or unselected files.
+traverse into host sessions or unselected files. The host's `mcp.json` is used on
+macOS; VMs mount `mcp-linux.json` as their local `mcp.json`.
 
 Changes to projected host files and directories are visible immediately.
 `settings.json` and `auth.json` instead refresh on the next VM launch. The
 read-write entries can also be changed, corrupted, or deleted by the agent;
-this is an explicit pragmatic concession. The host's general filesystem, host
-Pi sessions, SSH agent, USB devices, sound, and normal macOS command integration
+this is an explicit pragmatic concession. The ignored host-global `~/.pi/.env`,
+when present, is copied into the persistent template and loaded into each VM's
+Pi process environment; MCP children inherit it. The project directory's
+`.env` is not read by the VM launcher. The host's general filesystem, host Pi
+sessions, SSH agent, USB devices, sound, and normal macOS command integration
 are not shared.
 
 ## Network policy
@@ -185,4 +199,5 @@ allowed credentials in the host Pi configuration.
 | `vm/network-lockdown.sh` | Root-owned runtime egress filtering. |
 | `vm/pi-rootless-docker.service` | Declarative rootless Docker process configuration. |
 | `vm/guest-entrypoint.sh` | Activates project tools, synchronizes dependencies, waits for runtime policy and Docker, then starts Pi in `/workspace`. |
-| `agent/mcp.json` | Headless Chromium MCP configuration. |
+| `agent/mcp.json` | macOS headless Chromium MCP configuration. |
+| `agent/mcp-linux.json` | Linux VM headless Chromium MCP configuration. |

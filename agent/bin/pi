@@ -36,6 +36,9 @@ cleanup() {
   if (( stop_on_exit )); then
     orb stop "$machine" >/dev/null 2>&1 || true
   fi
+  if [[ -n "$launch_dir" ]]; then
+    rm -f "$launch_dir/host-ips"
+  fi
   if (( allocation_lock_held )); then
     rm -f "$allocation_lock"
   fi
@@ -127,6 +130,7 @@ for path in "$project_dir" "$host_config" "$launch_dir"; do
     exit 2
   fi
 done
+
 orb config set "machine.$machine.mounts" \
   "$project_dir:/workspace,$host_config:/mnt/pi-host,$launch_dir:/mnt/pi-launch"
 stop_on_exit=1

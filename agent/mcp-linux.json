@@ -8,18 +8,18 @@
       }
     },
     "chrome-devtools": {
-      "command": "mise",
+      "command": "/home/pi/.local/bin/mise",
       "args": [
         "exec",
         "-q",
         "node@latest",
         "--",
-        "npx",
-        "--yes",
-        "chrome-devtools-mcp@latest",
+        "chrome-devtools-mcp",
         "--headless",
         "--isolated",
-        "--executablePath=/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "--executablePath=/usr/bin/chromium",
+        "--chrome-arg=--no-sandbox",
+        "--chrome-arg=--disable-dev-shm-usage",
         "--allowUnrestrictedPaths"
       ]
 

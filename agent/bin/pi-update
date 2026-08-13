@@ -50,6 +50,16 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Copy the host-global Pi secrets file into the persistent template when
+# present. It is intentionally not projected from the live host at runtime.
+if [[ -f "$repo_root/.env" ]]; then
+  cat "$repo_root/.env" | orb -m "$template" -u root tee /home/pi/.pi/.env >/dev/null
+  orb -m "$template" -u root chown pi:pi /home/pi/.pi/.env
+  orb -m "$template" -u root chmod 0600 /home/pi/.pi/.env
+else
+  orb -m "$template" -u root rm -f /home/pi/.pi/.env
+fi
+
 # PyInfra connects through OrbStack's built-in localhost-only SSH server. uv
 # uses the repository lockfile and environment; guest-side caches remain in the
 # persistent template.
@@ -67,6 +77,9 @@ orb -m "$template" -u pi bash -lc '
   test "$(uname -m)" = aarch64
   ! command -v sudo >/dev/null
   command -v chromium >/dev/null
+  command -v firefox >/dev/null
+  command -v gh >/dev/null
+  export PATH="/home/pi/.local/share/mise/installs/node/latest/bin:/home/pi/.local/bin:/home/pi/.local/share/mise/shims:$PATH"
   export NODE_NO_WARNINGS=1
   /home/pi/.local/share/mise/installs/node/latest/bin/chrome-devtools-mcp --version >/dev/null
   /home/pi/.local/share/mise/installs/node/latest/bin/pi --version
