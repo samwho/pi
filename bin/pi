@@ -3,7 +3,7 @@ set -euo pipefail
 
 template="${PI_VM_TEMPLATE:-pi-template}"
 if ! orb info "$template" >/dev/null 2>&1; then
-  echo "$template is missing. Run $HOME/.pi/agent/bin/pi-update." >&2
+  echo "$template is missing. Run $HOME/.pi/bin/pi-update." >&2
   exit 1
 fi
 

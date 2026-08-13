@@ -2,10 +2,10 @@
 set -euo pipefail
 
 template="${PI_VM_TEMPLATE:-pi-template}"
-repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 
 if ! machine_info="$(orb info "$template" 2>/dev/null)"; then
-  echo "$template is missing. Run $HOME/.pi/agent/bin/pi-update." >&2
+  echo "$template is missing. Run $HOME/.pi/bin/pi-update." >&2
   exit 1
 fi
 

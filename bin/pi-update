@@ -2,7 +2,7 @@
 set -euo pipefail
 
 template="${PI_VM_TEMPLATE:-pi-template}"
-repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cpus="${PI_VM_CPUS:-4}"
 memory="${PI_VM_MEMORY:-4G}"
 disk="${PI_VM_DISK:-64G}"

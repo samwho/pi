@@ -10,17 +10,17 @@ and project dependency state. Pi has rootless Docker and headless Chromium.
 
 ```bash
 # Create or incrementally update the persistent stopped template with PyInfra.
-~/.pi/agent/bin/pi-update
+~/.pi/bin/pi-update
 
 # Preview the PyInfra changes without modifying the template.
-~/.pi/agent/bin/pi-diff
+~/.pi/bin/pi-diff
 
 # From any project: start/reuse an available VM, run Pi, then stop it on exit.
-~/.pi/agent/bin/pi
+~/.pi/bin/pi
 
 # Delete all stopped VMs and their state for the current project/profile.
 # The command refuses to delete while any matching VM is active.
-~/.pi/agent/bin/pi-delete
+~/.pi/bin/pi-delete
 ```
 
 A bare `pi` invocation uses the lowest available VM ordinal and resumes that
@@ -45,7 +45,7 @@ or loaded from the project directory's `.env`.
 The VM installs Arch's `github-cli` package, which provides the `gh` command.
 For noninteractive authentication, add `GH_TOKEN=github_pat_...` to the
 ignored host-global `~/.pi/.env`. Grant only the repository permissions needed
-for the tasks. Run `~/.pi/agent/bin/pi-update` after changing that file so the
+for the tasks. Run `~/.pi/bin/pi-update` after changing that file so the
 template copy is refreshed.
 
 PyInfra's built-in operations manage pacman, users, files, downloads, and both
@@ -184,10 +184,10 @@ allowed credentials in the host Pi configuration.
 
 | Path | Responsibility |
 | --- | --- |
-| `agent/bin/pi` | Persistent VM lifecycle, selective mounts, and Pi execution. |
-| `agent/bin/pi-delete` | Deletes all persistent VMs and in-VM state for the current project/profile, refusing while any are active. |
-| `agent/bin/pi-update` | Creates the template if absent and runs incremental PyInfra convergence. |
-| `agent/bin/pi-diff` | Starts the template if necessary and previews PyInfra operations and file diffs. |
+| `bin/pi` | Persistent VM lifecycle, selective mounts, and Pi execution. |
+| `bin/pi-delete` | Deletes all persistent VMs and in-VM state for the current project/profile, refusing while any are active. |
+| `bin/pi-update` | Creates the template if absent and runs incremental PyInfra convergence. |
+| `bin/pi-diff` | Starts the template if necessary and previews PyInfra operations and file diffs. |
 | `pyproject.toml`, `uv.lock` | Locked Python/PyInfra project used by updates and editor tooling. |
 | `vm/pyinfra/inventory.py` | Connects PyInfra to the template through OrbStack's built-in SSH server. |
 | `vm/pyinfra/deploy.py` | Declarative packages, users, files, services, and tool state. |
