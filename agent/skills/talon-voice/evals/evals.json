@@ -1,0 +1,59 @@
+{
+  "skill_name": "talon-voice",
+  "evals": [
+    {
+      "id": "new-command",
+      "prompt": "Add a voice command that presses Ctrl+Shift+P only in my editor, and keep it separate from the Community checkout.",
+      "expected_output": "The agent inspects the fileset, creates a narrowly scoped .talon command in a personal fileset, and explains how to reload and test it.",
+      "assertions": [
+        "The solution uses a .talon file for the spoken command",
+        "The command has an application or title context rather than being global",
+        "The solution does not edit the Community checkout",
+        "The response includes a reload/log validation step"
+      ]
+    },
+    {
+      "id": "action-and-capture",
+      "prompt": "I need a reusable Talon command that parses a direction and performs different Python behavior for north, south, east, and west.",
+      "expected_output": "The agent separates .talon grammar from Python declarations, uses a capture and action, and includes namespaced, typed, documented code.",
+      "assertions": [
+        "A Python Module declares the capture and action",
+        "The .talon rule uses capture syntax and passes the captured value",
+        "The action declaration has a docstring and type annotations",
+        "The response distinguishes this from arbitrary Python in a .talon body"
+      ]
+    },
+    {
+      "id": "phrase-override",
+      "prompt": "The Community command 'touch' does something I dislike. Can I copy it with an app context and remove one action?",
+      "expected_output": "The agent warns about exact spoken-form matching and recommends a new phrase, action override, or isolated vendoring before showing a phrase override.",
+      "assertions": [
+        "The answer says the spoken rule must match exactly, including syntax details",
+        "The answer does not claim that a more-specific context alone resolves a near-match",
+        "At least one safer alternative is recommended"
+      ]
+    },
+    {
+      "id": "nothing-happens",
+      "prompt": "Talon stopped responding to my commands after I edited a file. Please troubleshoot it.",
+      "expected_output": "The agent checks runtime, microphone, awake/mode state, engine, fileset reload/logs, context, and then uses REPL introspection.",
+      "assertions": [
+        "The troubleshooting sequence checks Talon's log for parse/import errors",
+        "The answer checks microphone and awake/mode state before assuming grammar is wrong",
+        "The answer suggests sim, mimic, or events.tail for runtime diagnosis",
+        "The answer asks for OS/version/path details before giving platform-specific commands"
+      ]
+    },
+    {
+      "id": "voice-coding",
+      "prompt": "How should I add voice support for a new programming language to Talon Community?",
+      "expected_output": "The agent follows the lang/<language> and lang/tags architecture, activates only implemented tags, and tests language selection and commands.",
+      "assertions": [
+        "The answer mentions both language-specific .talon and .py files",
+        "The answer explains shared user.code_* tag contracts",
+        "The answer includes language activation/title tracking validation",
+        "The answer does not assume optional editor integrations are installed"
+      ]
+    }
+  ]
+}
