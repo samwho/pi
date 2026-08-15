@@ -20,6 +20,7 @@ packages = [
     "bison",
     "ca-certificates",
     "chromium",
+    "composer",
     "curl",
     "docker",
     "docker-buildx",
@@ -47,6 +48,15 @@ packages = [
     "make",
     "neovim",
     "patch",
+    "php",
+    "php-apcu",
+    "php-fpm",
+    "php-gd",
+    "php-imagick",
+    "php-pgsql",
+    "php-redis",
+    "php-sqlite",
+    "php-xsl",
     "pkgconf",
     "ripgrep",
     "rootlesskit",
@@ -55,7 +65,9 @@ packages = [
     "shadow",
     "slirp4netns",
     "texinfo",
+    "unzip",
     "which",
+    "zip",
 ]
 
 pacman.packages(
@@ -63,6 +75,34 @@ pacman.packages(
     packages=packages,
     update=True,
     upgrade=True,
+)
+
+files.put(
+    name="Enable Laravel PHP extensions",
+    src=StringIO(
+        "; PHP extensions commonly required by Laravel applications.\n"
+        "extension=apcu.so\n"
+        "apc.enable_cli=1\n"
+        "extension=bcmath.so\n"
+        "extension=exif.so\n"
+        "extension=gd.so\n"
+        "extension=igbinary.so\n"
+        "extension=imagick.so\n"
+        "extension=intl.so\n"
+        "extension=mysqli.so\n"
+        "extension=pdo_mysql.so\n"
+        "extension=pdo_pgsql.so\n"
+        "extension=pdo_sqlite.so\n"
+        "extension=pgsql.so\n"
+        "extension=redis.so\n"
+        "extension=soap.so\n"
+        "extension=sqlite3.so\n"
+        "extension=xsl.so\n"
+    ),
+    dest="/etc/php/conf.d/laravel.ini",
+    user="root",
+    group="root",
+    mode="0644",
 )
 
 server.user(
@@ -127,6 +167,7 @@ for path, owner, mode in host.loop(
         ("/home/pi/.cache", "pi", "0700"),
         ("/home/pi/.cache/pnpm", "pi", "0700"),
         ("/home/pi/.pi/agent", "pi", "0700"),
+        ("/home/pi/.pi/agent/npm", "pi", "0700"),
         ("/home/pi/.pi/agent/sessions", "pi", "0700"),
         ("/mnt/pi-deps", "pi", "0700"),
         ("/mnt/pi-host", "root", "0700"),
@@ -148,6 +189,8 @@ for path, owner, mode in host.loop(
 managed_scripts = {
     "network-lockdown.sh": "/usr/local/bin/pi-network-lockdown",
     "prepare-runtime.sh": "/usr/local/bin/pi-prepare-runtime",
+    "pi-agent-dependencies.sh": "/usr/local/bin/pi-agent-dependencies",
+    "prefetch-mcp.sh": "/usr/local/bin/pi-prefetch-mcp",
     "project-dependencies.sh": "/usr/local/bin/pi-project-dependencies",
     "guest-entrypoint.sh": "/usr/local/bin/pi-guest",
 }
@@ -160,6 +203,15 @@ for source, destination in host.loop(managed_scripts.items()):
         group="root",
         mode="0755",
     )
+
+files.put(
+    name="Install the VM MCP configuration",
+    src=str(VM_DIR.parent / "agent" / "mcp-linux.json"),
+    dest="/home/pi/.pi/agent/mcp.json",
+    user="pi",
+    group="pi",
+    mode="0644",
+)
 
 files.put(
     name="Install the VM-specific Pi system prompt",

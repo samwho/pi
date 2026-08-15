@@ -22,6 +22,18 @@ disk_bytes() {
   esac
 }
 
+# Update extensions in the host installation, never through the VM launcher
+# at ~/.pi/agent/bin/pi. The refreshed host npm manifests are copied into VMs
+# at launch, where their Linux-native optional dependencies are rebuilt.
+host_node_root="$(mise where node@latest 2>/dev/null || true)"
+host_pi="$host_node_root/bin/pi"
+if [[ ! -x "$host_pi" ]]; then
+  echo "Could not find the host Pi CLI under mise's node@latest installation." >&2
+  exit 1
+fi
+echo "Updating host Pi extensions..."
+"$host_pi" update --extensions
+
 if ! orb info "$template" >/dev/null 2>&1; then
   echo "Creating persistent isolated Arch ARM64 template $template..."
   orb create \
@@ -79,8 +91,16 @@ orb -m "$template" -u pi bash -lc '
   command -v chromium >/dev/null
   command -v firefox >/dev/null
   command -v gh >/dev/null
-  export PATH="/home/pi/.local/share/mise/installs/node/latest/bin:/home/pi/.local/bin:/home/pi/.local/share/mise/shims:$PATH"
+  command -v php >/dev/null
+  command -v composer >/dev/null
+  php --version >/dev/null
+  composer --version >/dev/null
+  for extension in bcmath ctype curl dom exif fileinfo gd intl mbstring mysqli openssl PDO pdo_mysql pdo_pgsql pdo_sqlite redis soap sqlite3 tokenizer xml xsl zip; do
+    php -m | grep -Fx "$extension" >/dev/null
+  done
+  export PATH="/home/pi/.local/share/mise/installs/uv/latest/bin:/home/pi/.local/share/mise/installs/node/latest/bin:/home/pi/.local/bin:/home/pi/.local/share/mise/shims:$PATH"
   export NODE_NO_WARNINGS=1
+  /usr/local/bin/pi-prefetch-mcp
   /home/pi/.local/share/mise/installs/node/latest/bin/chrome-devtools-mcp --version >/dev/null
   /home/pi/.local/share/mise/installs/node/latest/bin/pi --version
   export DOCKER_HOST="unix:///run/user/$(id -u)/docker.sock"

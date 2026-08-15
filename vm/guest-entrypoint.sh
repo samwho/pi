@@ -53,5 +53,6 @@ cd /workspace
 eval "$('/home/pi/.local/bin/mise' activate bash)"
 export pnpm_config_store_dir=/home/pi/.cache/pnpm/store
 /usr/local/bin/pi-project-dependencies
+/usr/local/bin/pi-agent-dependencies
 
 exec /home/pi/.local/share/mise/installs/node/latest/bin/pi "$@"

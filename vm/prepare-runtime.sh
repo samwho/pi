@@ -11,12 +11,14 @@ mountpoint -q "$host_config"
 mountpoint -q "$launch_config"
 mountpoint -q /workspace
 
-mkdir -p "$agent_dir" "$agent_dir/sessions" /mnt/pi-deps /home/pi/.cache/pnpm
+mkdir -p "$agent_dir" "$agent_dir/sessions" "$agent_dir/npm" /mnt/pi-deps /home/pi/.cache/pnpm
+chown pi:pi "$agent_dir/npm"
 
 # Host node_modules may contain binaries for macOS, while this machine runs
-# Linux ARM64. Keep the dependency tree in the persistent VM disk so package
-# managers install optional native packages for this machine without mutating
-# the host checkout. Only JavaScript projects get the overlay.
+# Linux ARM64. Keep both project dependencies and Pi's extension package tree
+# in the persistent VM disk so package managers install optional native
+# packages for this machine without mutating the host checkout. Only
+# JavaScript projects get the project dependency overlay.
 if [[ -f /workspace/package.json ]]; then
   mkdir -p /workspace/node_modules
   mount --bind /mnt/pi-deps /workspace/node_modules
@@ -71,7 +73,7 @@ while IFS= read -r -d '' source; do
   case "$name" in
     # SYSTEM.md is owned by the VM image. Do not let a host-global custom
     # prompt replace the VM-specific prompt.
-    SYSTEM.md|sessions|mcp.json|mcp-linux.json|mcp-cache.json|mcp-npx-cache.json|pi-pretty) continue ;;
+    SYSTEM.md|sessions|mcp.json|mcp-linux.json|mcp-cache.json|mcp-npx-cache.json|pi-pretty|npm) continue ;;
   esac
   destination="$agent_dir/$name"
 
@@ -94,6 +96,19 @@ while IFS= read -r -d '' source; do
     mount -o remount,bind,ro "$destination"
   fi
 done < <(find "$host_config" -mindepth 1 -maxdepth 1 -print0)
+
+# Keep Pi's npm package metadata synchronized while leaving node_modules
+# VM-local. The guest bootstrap recreates the dependency tree with optional
+# packages selected for Linux ARM64.
+host_npm="$host_config/npm"
+guest_npm="$agent_dir/npm"
+for manifest in package.json package-lock.json; do
+  if [[ -f "$host_npm/$manifest" ]]; then
+    install -o pi -g pi -m 0644 "$host_npm/$manifest" "$guest_npm/$manifest"
+  else
+    rm -f "$guest_npm/$manifest"
+  fi
+done
 
 # Replace the platform-specific host config with the Linux VM config while
 # keeping it live and read-only like the other projected configuration.
