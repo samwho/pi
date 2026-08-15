@@ -25,6 +25,26 @@ disk_bytes() {
 pi_dir="${PI_CONFIG_DIR:-$HOME/.pi}"
 host_npm="$pi_dir/agent/npm"
 
+# Copy the host's generic agent-skill directory into the persistent template.
+# Skills are installed and updated by host tools such as `cloud`; VM
+# provisioning only transfers the host-managed directory.
+copy_host_agents_to_template() {
+  local source="$HOME/.agents"
+  local destination="/home/pi/.agents"
+
+  if [[ ! -d "$source" ]]; then
+    echo "Host ~/.agents not found; skipping guest agent-skill copy."
+    return 0
+  fi
+
+  echo "Copying host ~/.agents into $template..."
+  orb -m "$template" -u root rm -rf "$destination"
+  orb -m "$template" -u root mkdir -p "$destination"
+  COPYFILE_DISABLE=1 tar --format=ustar -C "$source" -cf - . |
+    orb -m "$template" -u root tar -C "$destination" -xf -
+  orb -m "$template" -u root chown -R pi:pi "$destination"
+}
+
 # Rebuild the extension dependency tree inside the Linux template. The
 # host's node_modules is never copied because it contains binaries for the host
 # platform. Keep this here, rather than in the pi launcher, so extension
@@ -116,6 +136,11 @@ PI_VM_TEMPLATE="$template" \
     --chdir "$repo_root/vm/pyinfra" \
     inventory.py deploy.py
 
+# Agent skills are host-managed; copy the complete host directory into the
+# stopped template after provisioning so newly cloned guests load it from
+# ~/.agents.
+copy_host_agents_to_template
+
 # Native extension dependencies belong to the update path, not the Pi startup
 # path. The template is updated first so future project VM clones inherit the
 # dependency tree.
@@ -127,6 +152,7 @@ update_template_extension_dependencies "$template"
 # /mnt/pi-launch mounted.
 orb -m "$template" -u pi bash -lc '
   set -euo pipefail
+  export PATH="/home/pi/.local/share/mise/installs/uv/latest/bin:/home/pi/.local/share/mise/installs/node/latest/bin:/home/pi/.local/bin:/home/pi/.local/share/mise/shims:$PATH"
   test "$(uname -m)" = aarch64
   ! command -v sudo >/dev/null
   command -v chromium >/dev/null
@@ -134,12 +160,13 @@ orb -m "$template" -u pi bash -lc '
   command -v gh >/dev/null
   command -v php >/dev/null
   command -v composer >/dev/null
+  command -v cloud >/dev/null
   php --version >/dev/null
   composer --version >/dev/null
-  for extension in bcmath ctype curl dom exif fileinfo gd intl mbstring mysqli openssl PDO pdo_mysql pdo_pgsql pdo_sqlite redis soap sqlite3 tokenizer xml xsl zip; do
+  cloud --version >/dev/null
+  for extension in bcmath ctype curl dom exif fileinfo gd iconv intl mbstring mysqli openssl PDO pdo_mysql pdo_pgsql pdo_sqlite redis soap sqlite3 tokenizer xml xsl zip; do
     php -m | grep -Fx "$extension" >/dev/null
   done
-  export PATH="/home/pi/.local/share/mise/installs/uv/latest/bin:/home/pi/.local/share/mise/installs/node/latest/bin:/home/pi/.local/bin:/home/pi/.local/share/mise/shims:$PATH"
   export NODE_NO_WARNINGS=1
   /usr/local/bin/pi-prefetch-mcp
   /home/pi/.local/share/mise/installs/node/latest/bin/chrome-devtools-mcp --version >/dev/null

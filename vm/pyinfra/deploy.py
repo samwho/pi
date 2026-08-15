@@ -88,6 +88,7 @@ files.put(
         "extension=gd.so\n"
         "extension=igbinary.so\n"
         "extension=imagick.so\n"
+        "extension=iconv.so\n"
         "extension=intl.so\n"
         "extension=mysqli.so\n"
         "extension=pdo_mysql.so\n"
@@ -103,6 +104,21 @@ files.put(
     user="root",
     group="root",
     mode="0644",
+)
+
+server.shell(
+    name="Install Laravel Cloud CLI",
+    commands=[
+        "install -d -o pi -g pi -m 0755 /home/pi/.local/bin",
+        "if [ ! -x /home/pi/.config/composer/vendor/bin/cloud ]; then "
+        "runuser -u pi -- env HOME=/home/pi "
+        "COMPOSER_HOME=/home/pi/.config/composer "
+        "/usr/bin/composer global require --no-interaction --no-progress "
+        "laravel/cloud-cli:^0.5.0; "
+        "fi",
+        "ln -sfn /home/pi/.config/composer/vendor/bin/cloud /home/pi/.local/bin/cloud",
+        "chown -h pi:pi /home/pi/.local/bin/cloud",
+    ],
 )
 
 server.user(

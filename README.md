@@ -56,6 +56,25 @@ ignored host-global `~/.pi/.env`. Grant only the repository permissions needed
 for the tasks. Run `~/.pi/agent/bin/pi-update` after changing that file so the
 template copy is refreshed.
 
+## Laravel Cloud CLI
+
+The Linux template installs Laravel's official `laravel/cloud-cli` package and
+exposes it as `cloud`. The macOS host may install it separately with:
+
+```bash
+composer global require laravel/cloud-cli
+```
+
+Authenticate each host or VM separately with `cloud auth:token --add`; Cloud
+CLI credentials are intentionally not projected between host and guest. Agent
+skills are host-managed: if `~/.agents` exists, `pi-update` copies the complete
+directory into the guest template. Hosts without `~/.agents` simply skip this
+step; recreate existing project VMs if they need the updated skill directory.
+
+Laravel's `laravel/mcp` package builds MCP servers for Laravel applications; it
+is not a Laravel Cloud control-plane client. This setup therefore uses the
+first-party Cloud CLI rather than an unofficial Laravel Cloud MCP server.
+
 PyInfra's built-in operations manage pacman, users, files, downloads, and both
 system and user systemd services. Because PyInfra has no mise operation, this
 repository provides custom mise facts and operations in `vm/pyinfra/`. They
