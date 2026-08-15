@@ -16,9 +16,9 @@ chown pi:pi "$agent_dir/npm"
 
 # Host node_modules may contain binaries for macOS, while this machine runs
 # Linux ARM64. Keep both project dependencies and Pi's extension package tree
-# in the persistent VM disk so package managers install optional native
-# packages for this machine without mutating the host checkout. Only
-# JavaScript projects get the project dependency overlay.
+# in the persistent VM disk without mutating the host checkout. pi-update
+# prepares the extension tree; only JavaScript projects get the project
+# dependency overlay here.
 if [[ -f /workspace/package.json ]]; then
   mkdir -p /workspace/node_modules
   mount --bind /mnt/pi-deps /workspace/node_modules
@@ -81,6 +81,26 @@ while IFS= read -r -d '' source; do
     # Keep the VM-local copy writable so Pi can safely replace it with rename(2).
     # Host configuration remains the source of truth on the next VM launch.
     install -o pi -g pi -m 0600 "$source" "$destination"
+
+    # A stored llama.cpp credential contains the host-side URL, commonly
+    # 127.0.0.1. That address is the guest itself, not the macOS host. Rewrite
+    # only the VM-local snapshot so the host credentials remain unchanged and
+    # the launcher can select the current host address for each VM.
+    if [[ "$name" == "auth.json" && -r "$launch_config/llama-base-url" ]]; then
+      llama_base_url="$(<"$launch_config/llama-base-url")"
+      if [[ -n "$llama_base_url" && -s "$destination" ]]; then
+        rewritten_auth="$(mktemp "$agent_dir/.auth.XXXXXX")"
+        jq --arg base_url "$llama_base_url" '
+          if .["llama.cpp"]? then
+            .["llama.cpp"].env = ((.["llama.cpp"].env // {}) + {"LLAMA_BASE_URL": $base_url})
+          else
+            .
+          end
+        ' "$destination" >"$rewritten_auth"
+        install -o pi -g pi -m 0600 "$rewritten_auth" "$destination"
+        rm -f "$rewritten_auth"
+      fi
+    fi
     continue
   elif [[ -d "$source" ]]; then
     mkdir -p "$destination"
@@ -96,19 +116,6 @@ while IFS= read -r -d '' source; do
     mount -o remount,bind,ro "$destination"
   fi
 done < <(find "$host_config" -mindepth 1 -maxdepth 1 -print0)
-
-# Keep Pi's npm package metadata synchronized while leaving node_modules
-# VM-local. The guest bootstrap recreates the dependency tree with optional
-# packages selected for Linux ARM64.
-host_npm="$host_config/npm"
-guest_npm="$agent_dir/npm"
-for manifest in package.json package-lock.json; do
-  if [[ -f "$host_npm/$manifest" ]]; then
-    install -o pi -g pi -m 0644 "$host_npm/$manifest" "$guest_npm/$manifest"
-  else
-    rm -f "$guest_npm/$manifest"
-  fi
-done
 
 # Replace the platform-specific host config with the Linux VM config while
 # keeping it live and read-only like the other projected configuration.

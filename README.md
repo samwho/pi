@@ -36,12 +36,15 @@ the persistent template in place with PyInfra, retaining pacman, npm, mise, and
 container caches. It installs current Arch packages, including PHP, Composer,
 Laravel-friendly PHP extensions, SQLite, and the frontend toolchain; the latest
 Node, Bun, Rust, uv, Python, and Biome through mise; and Pi plus
-`chrome-devtools-mcp`. It also starts every configured Linux MCP server in the
-stopped template long enough to warm its dependency caches, so cloned project
-VMs do not each download the same server packages. Run it to update tools or
-apply changes under `vm/pyinfra/` and `vm/`. Host Pi configuration is mounted
-live at runtime and does not require an update. The host-global `~/.pi/.env`, when present, is
-copied into the persistent `pi-template` at `/home/pi/.pi/.env` by
+`chrome-devtools-mcp`. It also copies the extension manifests into the template
+and installs their Linux-native optional dependencies there, so newly cloned
+project VMs start without downloading extension dependencies. It starts every
+configured Linux MCP server in the stopped template long enough to warm its
+dependency caches, so cloned project VMs do not each download the same server
+packages. Run it to update tools or apply changes under `vm/pyinfra/` and `vm/`.
+Host Pi configuration is mounted live at runtime, while extension dependency
+changes are prepared by `pi-update`. The host-global `~/.pi/.env`, when present,
+is copied into the persistent `pi-template` at `/home/pi/.pi/.env` by
 `pi-update`; every VM's `pi` entrypoint sources that file. It is not related to
 or loaded from the project directory's `.env`.
 
@@ -120,13 +123,13 @@ claim the same ordinal. The only host paths mounted into each persistent VM are:
 Sessions, Linux-native project `node_modules`, Pi's Linux-native extension
 package tree, the pnpm package store, and other mutable runtime state remain on
 the VM disk. The root-owned boot service overlays JavaScript projects' host
-`node_modules` with `/mnt/pi-deps` inside that disk. Before Pi starts, the guest
-activates the repository's mise environment, synchronizes dependencies from
-conventional package-manager lockfiles, and reconciles Pi's npm package store
-with optional dependencies enabled. Changes to manifests, lockfiles, or
-toolchain files invalidate the project dependency stamp; changes to Pi's npm
-manifests or the guest platform invalidate its extension dependency stamp. No
-repository name or dependency version is encoded in the VM.
+`node_modules` with `/mnt/pi-deps` inside that disk. `pi-update` prepares the
+extension package tree in the template with optional dependencies selected for
+Linux ARM64; project VMs cloned afterward inherit it. Before Pi starts, the
+guest activates the repository's mise environment and synchronizes project
+dependencies from conventional package-manager lockfiles. Changes to project
+manifests, lockfiles, or toolchain files invalidate the project dependency
+stamp. No repository name or dependency version is encoded in the VM.
 
 A root-owned boot service projects each top-level host Pi configuration entry
 except `SYSTEM.md`, `sessions/`, the per-VM cache files, and `npm/` into
@@ -138,11 +141,11 @@ without creating stale file mounts; host copies are the defaults for the next
 launch, and VM changes to those two files are not synced back. OAuth/model state
 and trust remain read-write mounts. `mcp-cache.json` and `mcp-npx-cache.json`
 remain on the VM disk because their atomic replacement is incompatible with
-projecting individual host files as mount points. The host npm package manifests
-are copied into the VM, but its `node_modules` is rebuilt locally with optional
-dependencies enabled, so macOS and Linux native packages never share a
-dependency tree. All other entries—including extensions, skills, prompts,
-themes, MCP configuration, and git package directories—are bind-mounted
+projecting individual host files as mount points. The host npm directory is not
+projected; the template's Linux-native package tree is retained in each clone,
+so macOS and Linux native packages never share a dependency tree. All other
+entries—including extensions, skills, prompts, themes, MCP configuration, and
+git package directories—are bind-mounted
 read-only. The original source mount is then covered so Pi cannot traverse into
 host sessions or unselected files. The host's `mcp.json` is used on macOS; VMs
 mount `mcp-linux.json` as their local `mcp.json`.
@@ -173,7 +176,10 @@ public IPv6 destinations by prefix. Rootless Docker traffic exits through an
 unprivileged RootlessKit process and remains subject to this outer policy.
 
 The launcher derives the address list from the host's interfaces and passes it
-through the root-owned runtime mount as exact `/32` exceptions.
+through the root-owned runtime mount as exact `/32` exceptions. It also passes
+the selected host address to the guest as `LLAMA_BASE_URL` and rewrites only the
+VM-local llama.cpp credential snapshot, so a host-side `127.0.0.1` URL does not
+leak into the guest. Override the URL with `PI_VM_LLAMA_BASE_URL` when needed.
 
 ## Security model
 
@@ -205,8 +211,8 @@ allowed credentials in the host Pi configuration.
 | `vm/pyinfra/facts.py` | Facts for installed and current upstream mise/npm versions. |
 | `vm/pyinfra/operations.py` | Declarative mise tool and mise-scoped npm operations. |
 | `vm/SYSTEM.md` | VM-only copy of Pi's default system prompt with low-memory and host-server guidance. |
-| `vm/prepare-runtime.sh` | Projects live Pi config, protects Git metadata, overlays native dependencies, and applies network policy. |
-| `vm/pi-agent-dependencies.sh` | Rebuilds Pi's VM-local npm package tree with platform-appropriate optional dependencies. |
+| `vm/prepare-runtime.sh` | Projects live Pi config, protects Git metadata, overlays project dependencies, and applies network policy. |
+| `vm/pi-agent-dependencies.sh` | Installs the template's Linux-native Pi extension package tree during `pi-update`. |
 | `vm/prefetch-mcp.sh` | Starts configured MCP servers during template updates to warm their dependency caches. |
 | `vm/project-dependencies.sh` | Detects project package-manager inputs and installs Linux-native dependencies from the repository's own lockfiles. |
 | `vm/network-lockdown.sh` | Root-owned runtime egress filtering. |

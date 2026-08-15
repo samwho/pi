@@ -2,10 +2,12 @@
 
 Read this when installing Talon/Community, diagnosing a command that does
 nothing or the wrong thing, checking reloads, or validating a change. The
-canonical sources are [installation](https://talon.wiki/Resource%20Hub/Talon%20Installation/installation_guide),
+primary Community references are [installation](https://talon.wiki/Resource%20Hub/Talon%20Installation/installation_guide),
 [downloading Community](https://talon.wiki/Resource%20Hub/Talon%20Installation/downloading-community),
 [miscellaneous tips](https://talon.wiki/Customization/misc-tips), and
 [speech troubleshooting](https://talon.wiki/Resource%20Hub/Speech%20Recognition/troubleshooting).
+These are version-sensitive references; compare them with the installed Talon
+build and active fileset.
 
 ## Establish the runtime first
 
@@ -24,7 +26,7 @@ Typical paths are:
 | Platform | Talon Home | User files |
 | --- | --- | --- |
 | macOS/Linux | `~/.talon` | `~/.talon/user` |
-| Windows | `%APPDATA%\\Talon` | `%APPDATA%\\Talon\\user` |
+| Windows | `%APPDATA%\Talon` | `%APPDATA%\Talon\user` |
 
 The log is normally `talon.log` in Talon Home. The installed command-line REPL
 is commonly `~/.talon/bin/repl` on macOS/Linux. These are defaults, not proof;
@@ -42,7 +44,7 @@ cd ~/.talon/user
 git clone https://github.com/talonhub/community community
 ```
 
-On Windows, use the equivalent `%APPDATA%\\Talon\\user` path. A zip download is
+On Windows, use the equivalent `%APPDATA%\Talon\user` path. A zip download is
 fine for exploration, but Git or a separate personal repository is safer for
 long-term customization. Keep personal `.talon`, `.py`, `.talon-list`, and
 snippet files in a neighboring directory rather than editing `community`.
@@ -54,25 +56,37 @@ the Talon runtime using its stubs and follow its pre-commit conventions.
 
 ## A deterministic diagnosis loop
 
-1. **Talon process:** confirm the tray/menu-bar icon is present.
+1. **Talon process:** confirm Talon is running using the process, log, or
+   menu icon when available. On Linux, a missing tray icon may only mean
+   AppIndicator/KStatusNotifierItem support is absent.
 2. **Microphone:** verify the OS input level, Talon's selected microphone, mute,
    gain, placement, and recording quality.
 3. **Speech state:** confirm Talon is awake and in the expected mode. In
-   Community, `wake up`, `go to sleep`, `command mode`, and `dictation mode`
-   are the usual checks.
-4. **Engine:** inspect the log for speech-engine activation. Conformer is the
-   normal command-and-dictation choice; Webspeech/Vosk are dictation-oriented
-   alternatives in beta and cannot generally replace a command engine.
-5. **Fileset/load:** use `help active`, `help context`, or `help search ...` to
-   see whether the command exists. Read the log for `[-]`, `[+]`, parse, import,
-   and traceback lines after saving.
+   Community (and not necessarily Dragon or other filesets), `wake up`, `go to
+   sleep`, `command mode`, and `dictation mode` are the usual checks.
+4. **Engine:** inspect the log for speech-engine activation. In Talon 0.4-era
+   and current Community guidance, W2L Conformer/Conformer D is the normal
+   command-and-dictation engine; Webspeech/Vosk are beta dictation engines and
+   cannot stand alone for commands. Verify the Speech Recognition menu for the
+   installed build.
+5. **Fileset/load:** in Community, use `help active`, `help context`, or
+   `help search ...` to see whether the command exists. Other filesets may use
+   different commands; use their documentation or the REPL. Read the log for
+   `[-]`, `[+]`, parse, import, and traceback lines after saving.
 6. **Context:** focus the intended application/window and verify app/title/OS,
-   tags, mode, and language. Use the debug window or `ui.apps()` rather than
-   guessing an application identifier.
+   tags, mode, and language. Use the Debug Window if available; otherwise use
+   `ui.apps()` or the REPL rather than guessing an application identifier.
 7. **Grammar:** use the exact rule with `sim("spoken phrase")`; inspect whether
    an optional, capture, anchor, or competing rule changes the match.
-8. **Execution:** use `mimic("spoken phrase")` for a repeatable test, then
-   `events.tail()` (or `events.tail(noisy=True)`) to see the action chain.
+8. **Execution:** start event tracing before execution:
+
+```python
+events.tail()
+mimic("a harmless phrase")
+```
+
+`mimic` tests grammar matching and action execution, not microphone capture or
+ASR recognition.
 9. **Action/API:** use `actions.list("prefix")` and `actions.find("term")`;
    verify the action exists, its arguments are correct, and a Context override
    is not shadowing it. Check `registry.commands`, `registry.lists`, and related
@@ -97,11 +111,12 @@ ui.apps()                         # inspect app/window data
 ```
 
 Community's spoken command `talon open rebel` opens its REPL in many setups;
-the Talon menu is the dependable fallback. The standalone REPL can be used as
-an RPC-like interface, for example on Linux:
+the Talon menu is the dependable fallback. The standalone `~/.talon/bin/repl`
+is a REPL client that requires a running Talon instance. For a deterministic
+example on Linux:
 
 ```bash
-echo 'actions.speech.toggle()' | ~/.talon/bin/repl
+echo 'actions.speech.enable()' | ~/.talon/bin/repl
 ```
 
 Use `app.notify` or a log `print` for a minimal observable test. Never paste a
@@ -119,14 +134,17 @@ secret/authentication key into a public issue or an agent transcript.
 - **Import error:** the Python file imports a package unavailable in Talon's
   embedded environment, has a syntax/type/signature mistake, or runs
   context-dependent code during import.
-- **Intermittent/cut-off input:** inspect recordings, microphone noise/gain,
-  and `speech.timeout`; increase it only as much as needed because it increases
+- **Intermittent/cut-off input:** `speech.timeout` primarily affects utterance
+  segmentation at pauses. Before diagnosing recordings, enable Speech
+  Recognition → Save Recordings, then inspect them alongside microphone
+  noise/gain; increase the timeout only as much as needed because it increases
   latency.
 - **Slow or stalled behavior:** look for long action bodies, excessive
-  `sleep`, blocking callbacks, and log/watchdog `(stalled)` messages. Move
-  polling/background work to `cron` or an asynchronous design.
-- **Linux startup issue:** Talon expects an X11 session; Wayland support is
-  limited/not supported. Verify the session before debugging scripts.
+  `sleep`, blocking callbacks, and log/watchdog `(stalled)` messages. Use
+  `cron` only for short periodic callbacks; put blocking polling/background
+  work in a thread/process or use a non-blocking design.
+- **Linux startup issue:** Talon does not support Wayland; select an X11
+  session before debugging scripts.
 - **Eye tracking:** calibrate after moving the tracker/monitor or changing
   lighting; inspect permissions and the Talon log before changing scripts.
 

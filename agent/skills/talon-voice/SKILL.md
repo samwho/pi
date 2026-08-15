@@ -27,7 +27,7 @@ commands and actions.
 
 1. Identify the Talon version, OS, speech engine, user-file-set root, and the
    application/context involved. Do not assume `~/.talon` is the right path on
-   Windows (`%APPDATA%\\Talon`) or that the user has Talon Community installed.
+   Windows (`%APPDATA%\Talon`) or that the user has Talon Community installed.
 2. Inspect the existing files and conventions before editing. Search for the
    action, list, tag, spoken form, or context that the user mentions; do not
    invent an action name merely because it sounds plausible.
@@ -57,16 +57,18 @@ commands and actions.
    owns the name.
 2. **Design.** Prefer a new, unambiguous phrase or a narrowly scoped context.
    Use an explicit well-known `app` matcher when one exists; otherwise use the
-   observed `app.name`, `app.exe`, `app.bundle`, or `title` value. Use a tag for
+   observed `app.name`, executable basename via `app.exe`, full executable path via `app.exe_path`, `app.bundle`, or `title` value. Use a tag for
    an optional feature set, not a global pile of app-specific commands.
 3. **Implement.** Put command grammar in `.talon` and Python behavior in `.py`.
    Use the smallest working example and preserve the target fileset's style.
-   Custom names belong in the `user.` namespace and should have a distinctive
-   prefix to avoid collisions.
+   Custom actions, captures, lists, tags, modes, and settings belong in the
+   `user.` namespace and should have a distinctive prefix to avoid collisions;
+   `mod.apps` names are app matchers, not `user.*` names.
 4. **Validate.** Save the files and wait for Talon's automatic reload. Read the
-   Talon log for parse/import errors. In the REPL, use `sim(...)` to locate a
-   matching command, `mimic(...)` to replay it, `actions.list/find(...)` to
-   inspect actions, and `events.tail()` to observe what actually ran.
+   Talon log for parse/import errors. In the installed Talon REPL, use the available `sim(...)`, `mimic(...)`,
+   `actions.list/find(...)`, and `events.tail()` helpers to locate, replay,
+   inspect, and observe behavior. If a helper is unavailable, use that build's
+   documented equivalent and the log.
 5. **Report.** State the files changed, the context in which the command is
    active, the runtime checks performed, and any checks that could not be run
    because Talon or the target application was unavailable.
@@ -74,8 +76,8 @@ commands and actions.
 ## Non-negotiable gotchas
 
 - A `.talon` context header is above one line containing `-`; the body is below
-  it. Without a header, the body is always active. A file without an explicit
-  mode normally requires command mode.
+  it. Without a header or dash, the body has no app/OS/etc. requirements;
+  unless a mode is specified, it is normally active only in command mode.
 - Same-type context requirements are OR-ed; different types are AND-ed. `and`
   joins with the preceding requirement, and `not` negates. Regex matchers use
   Python-style `/pattern/flags` search semantics.
@@ -88,13 +90,16 @@ commands and actions.
 - Context list contents replace one another; they do not merge. Captures are
   the extensibility pattern when users need to add entries without copying a
   large upstream list.
-- Reusing a phrase is not a reliable override unless the spoken rule matches
-  upstream exactly, including whitespace, optionals, captures, and punctuation.
-  Prefer overriding the underlying action, adding a new phrase, or vendoring
-  and disabling the original.
+- Avoid near-duplicate phrase rules: precedence is not a stable customization
+  API, and a near-match can load as a second command. Compare the effective
+  upstream grammar, including grouping, optionals, captures, anchors, and other
+  matching details. Prefer overriding the underlying action, adding a new
+  phrase, or isolated vendoring and disabling the original.
 - Do not block Talon's main thread with long work or unnecessary `sleep(...)`.
-  Use lifecycle callbacks, `cron`, or asynchronous techniques for polling and
-  background work. Do not read context-dependent settings at Python import time.
+  Use lifecycle callbacks only for short setup and `cron` only for short
+  periodic callbacks. Put blocking polling/I/O in a thread/process or use a
+  non-blocking design, and marshal results back safely. Do not read
+  context-dependent settings at Python import time.
 - If Talon has no user files, it has no useful voice commands. If behavior is
   surprising, first establish which fileset and speech engine are actually
   loaded rather than assuming the Community commands are present.
@@ -104,7 +109,8 @@ commands and actions.
 A context-sensitive command:
 
 ```talon
-title: /My App/i
+# Replace My Editor with the observed application name.
+app.name: My Editor
 -
 hello talon: "hello world"
 

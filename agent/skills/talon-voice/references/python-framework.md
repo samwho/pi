@@ -26,6 +26,10 @@ class Actions:
         """Open path in the current project tool."""
         # Implement with Talon actions or Python APIs.
         pass
+
+    def transform(value: str) -> str:
+        """Transform a value."""
+        return value
 ```
 
 The method above is exposed as `user.open_project`. All user-defined actions,
@@ -44,7 +48,11 @@ An empty Context is always active. Set `ctx.matches` to a Talon context-header
 string to restrict it:
 
 ```python
-from talon import Context, actions
+from talon import Context, Module, actions
+
+mod = Module()
+# Replace My Editor with the observed application name.
+mod.apps.my_editor = "app.name: My Editor"
 
 ctx = Context()
 ctx.matches = """
@@ -97,7 +105,13 @@ replaces the less-specific mapping.
 Declare a list before using `{user.name}` in grammar:
 
 ```python
+from talon import Context, Module
+
+mod = Module()
 mod.list("project", desc="Project names")
+# Replace My Editor with the observed application name.
+mod.apps.my_editor = "app.name: My Editor"
+
 ctx = Context()
 ctx.lists["user.project"] = {
     "alpha project": "/work/alpha",
@@ -168,7 +182,9 @@ header can then say `app: my_editor`.
 
 ## Runtime APIs and lifecycle
 
-The official stable surface includes:
+The official 0.4.0 documentation exposes these top-level API names; verify
+`registry`, `scope`, and `storage` against the installed build before relying
+on them.
 
 - `talon.actions`, `talon.registry`, `talon.scope`, `talon.settings`, and
   `talon.storage` for runtime integration/introspection;
@@ -183,9 +199,10 @@ Other commonly used modules include `ui`, `cron`, `screen`, `imgui`, `canvas`,
 `ctrl`, and `skia`; their signatures are version-sensitive. Talon ships
 `.pyi` stubs inside its resources Python site-packages directory. Prefer those
 stubs and the installed user fileset over guessing an API. Talon embeds Python,
-so the host Python installation is not the API environment. Use a Talon
-`.venv` only when a package is genuinely required and the target user accepts
-that setup cost.
+so the host Python installation is not the API environment. A normal host/editor
+virtualenv does not change Talon's embedded Python environment. Use Talon
+Home's `.venv`/`pip` mechanism only when a runtime package is genuinely required
+and the user accepts that setup.
 
 Keep callbacks short and non-blocking. Use `cron` for periodic work and avoid
 network calls or long loops on Talon's main thread. When doing file or process

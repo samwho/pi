@@ -7,9 +7,9 @@ package_json="$npm_root/package.json"
 lockfile="$npm_root/package-lock.json"
 stamp_file="$agent_dir/.npm-dependencies.sha256"
 
-# The host package store is intentionally not mounted into the VM. The runtime
-# preparation step copies only the manifests here, so npm can resolve native
-# optional dependencies for the guest platform.
+# The host package store is intentionally not mounted into the VM. pi-update
+# copies only the manifests here, so npm can resolve native optional
+# dependencies for the guest platform.
 [[ -f "$package_json" ]] || exit 0
 
 platform="$(node -p '`${process.platform}-${process.arch}`')"

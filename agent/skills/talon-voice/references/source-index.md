@@ -8,10 +8,11 @@ Ask for the Talon version before relying on beta or version-specific behavior.
 
 ## Reviewed primary sources
 
-- [Official Talon documentation](https://talonvoice.com/docs/) — Talon 0.4.0
-  documentation page containing the introduction, getting started guidance,
-  `.talon` overview, and API reference for `Context`, `Module`, `app`, `clip`,
-  `fs`, and `noise`.
+- [Official Talon documentation](https://talonvoice.com/docs/) — historical
+  Talon 0.4.0 documentation containing the introduction, getting started
+  guidance, `.talon` overview, and API reference for `Context`, `Module`, `app`,
+  `clip`, `fs`, and `noise`. See the [changelog](https://talonvoice.com/dl/latest/changelog.html)
+  for release notes.
 - [Talon Community Wiki](https://talon.wiki/) — community-maintained guidance
   covering installation, basic use, grammar, the framework, voice coding,
   integrations, hardware, speech engines, and troubleshooting.
@@ -19,15 +20,17 @@ Ask for the Talon version before relying on beta or version-specific behavior.
   practical source of available Community commands, action names, lists, tags,
   snippets, app integrations, tests, and current conventions.
 
-At review time the wiki sitemap enumerated 53 URLs; all were fetched, including
-its dynamic utility pages and the moved legacy API page. The repository
-Markdown was used to read the complete page content without copying the site
-shell into this skill.
+On 2026-08-15, `https://talon.wiki/sitemap.xml` listed 53 URLs. Treat this
+as a navigation snapshot, not a guarantee that every page remains current.
+The [Wiki repository](https://github.com/TalonCommunity/Wiki) was used to read
+repository Markdown where practical, without copying the site shell into this
+skill.
 
-The wiki sitemap also contains dynamic [Repository Explorer](https://talon.wiki/explorer)
-and [documentation search](https://talon.wiki/search) pages. The old
-[unofficial API page](https://talon.wiki/unofficial_talon_docs) says its content
-moved into the Customization sections.
+The sitemap also contains dynamic [Repository Explorer](https://talon.wiki/explorer)
+and [documentation search](https://talon.wiki/search) pages. Treat these as
+navigation/search utilities, not authoritative static technical sources. The
+old [unofficial API page](https://talon.wiki/unofficial_talon_docs) says its
+content moved into the Customization sections.
 
 ## Topic map
 
@@ -50,4 +53,7 @@ references, and recommended `SKILL.md` size. The activation description and
 lean reference layout follow [best practices for skill creators](https://agentskills.io/skill-creation/best-practices)
 and [description optimization](https://agentskills.io/skill-creation/optimizing-descriptions).
 For future refinement, use the [evaluation guide](https://agentskills.io/skill-creation/evaluating-skills)
-to compare realistic Talon tasks with and without the skill.
+to compare realistic Talon tasks with and without the skill. For mutable Wiki
+and Community sources, record review dates or commits when practical; direct
+users to the installed Talon build, fileset, log, and shipped stubs as the
+final authority.

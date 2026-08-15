@@ -14,16 +14,18 @@ optional context header followed by a body:
 ```talon
 # Header: requirements above the one dash
 os: mac
-app: my_editor
+# Replace My Editor with the observed application name.
+app.name: My Editor
 -
 # Body: commands, tags, settings, and hotkeys
 open palette: key(cmd-shift-p)
 ```
 
 The dash is significant and should appear once. With no header (or no dash),
-the body starts immediately and is always active. Comments begin with `#` on
-their own line. Indented action bodies use spaces; the exact indentation width
-is not significant, but be consistent with the surrounding files.
+the body starts immediately and has no app/OS/etc. requirements; unless a mode
+is specified, it is normally active only in command mode. Comments begin with
+`#` on their own line. Indented action bodies use spaces; the exact indentation
+width is not significant, but be consistent with the surrounding files.
 
 A user file set is not just a collection of commands: it is the active runtime
 configuration. Before editing, find the actual Talon Home/user path and all
@@ -40,7 +42,8 @@ Common matchers:
 | `os` | `linux`, `mac`, or `windows` |
 | `app` | An explicitly declared well-known app |
 | `app.name` | Observed application name |
-| `app.exe` | Executable path/name |
+| `app.exe` | Executable basename, e.g. `firefox` or `firefox.exe` |
+| `app.exe_path` | Full executable path, e.g. `/usr/lib/firefox/firefox` |
 | `app.bundle` | macOS bundle identifier |
 | `title` | Window title |
 | `tag` / `mode` | Active tags or modes |
@@ -70,7 +73,15 @@ one, but do not rely on undocumented tie-breakers for competing phrases.
 A file without an explicit `mode` normally applies in command mode. Use
 `mode: dictation` (or another active mode) when that is intentional. Modes are
 global; tags are usually better for a feature that should be enabled only in a
-particular application/context.
+particular application/context. Custom tags and settings must first be declared
+in Python, then can be activated or set in Talonscript:
+
+```talon
+tag(): user.feature
+
+settings():
+    user.some_setting = 1
+```
 
 ## Voice-command rules
 
@@ -97,18 +108,22 @@ or alternative values may be absent, so use Talonscript's null-coalescing
 `or`, for example:
 
 ```talon
+# Schematic: `user.word` must be declared in the loaded fileset.
 insert default [<user.word>]:
     insert(word or "default")
 ```
 
 Do not confuse that `or` with Python boolean-or semantics. If a rule uses a
-list/capture, confirm that it is declared and active in the same context.
+list/capture, ensure the list/capture is declared somewhere in the loaded
+fileset and that an applicable list mapping or capture implementation is
+active.
 
 ## Talonscript bodies
 
 Talonscript is a small statically typed language, not arbitrary Python. It
 supports local assignment, strings (including multiline strings), one simple
-arithmetic operation per line, action calls, `repeat(n)`, and duration-aware
+arithmetic operation per line, action calls, `repeat(n)` (which repeats the
+immediately preceding action line, not a general loop/block), and duration-aware
 `sleep(500ms)`, `sleep(2s)`, etc. A single action can use the compact form:
 
 ```talon
@@ -168,11 +183,11 @@ a static list is simpler and more predictable otherwise.
 
 ## Phrase overrides: a last resort
 
-Two commands are only a true phrase-level replacement when their spoken rules
-match exactly, including whitespace, punctuation, optionals, and captures. A
-near-match loads as a second command, and Talon's tie-break behavior is not a
-stable customization API. A context header does not repair a differing phrase.
-Prefer, in order:
+A phrase-level replacement depends on the effective upstream grammar matching;
+compare grouping, optionals, captures, anchors, and other matching details
+rather than assuming a near-duplicate is an override. A near-match loads as a
+second command, and Talon's tie-break behavior is not a stable customization
+API. A context header does not repair a differing phrase. Prefer, in order:
 
 1. add a new phrase with the desired behavior;
 2. override the underlying action in a narrow Context;
