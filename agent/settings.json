@@ -20,9 +20,8 @@
     "git:github.com/badlogic/pi-skills",
     "npm:pi-mcp-adapter",
     "npm:@pi-plugins/usage",
-    "npm:@99percentpeople/pi-background-tasks",
     "npm:@wierdbytes/pi-facelift",
-    "npm:@ff-labs/pi-fff",
-    "npm:@tintinweb/pi-subagents"
+    "npm:@tintinweb/pi-subagents",
+    "npm:pi-context-view"
   ]
 }
