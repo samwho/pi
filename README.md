@@ -65,11 +65,14 @@ exposes it as `cloud`. The macOS host may install it separately with:
 composer global require laravel/cloud-cli
 ```
 
-Authenticate each host or VM separately with `cloud auth:token --add`; Cloud
-CLI credentials are intentionally not projected between host and guest. Agent
-skills are host-managed: if `~/.agents` exists, `pi-update` copies the complete
-directory into the guest template. Hosts without `~/.agents` simply skip this
-step; recreate existing project VMs if they need the updated skill directory.
+Authenticate the macOS host with `cloud auth:token --add`, then run
+`pi-update` while `~/.config/cloud/config.json` exists. It copies that file into
+the template at `/home/pi/.config/cloud/config.json` with mode `0600`; if the
+host file is absent, it is ignored. Newly cloned project VMs inherit the
+template copy. Agent skills are host-managed: if `~/.agents` exists,
+`pi-update` copies the complete directory into the guest template. Hosts without
+`~/.agents` simply skip this step; recreate existing project VMs if they need
+the updated skill directory.
 
 Laravel's `laravel/mcp` package builds MCP servers for Laravel applications; it
 is not a Laravel Cloud control-plane client. This setup therefore uses the
@@ -174,9 +177,12 @@ Changes to projected host files and directories are visible immediately.
 read-write entries can also be changed, corrupted, or deleted by the agent;
 this is an explicit pragmatic concession. The ignored host-global `~/.pi/.env`,
 when present, is copied into the persistent template and loaded into each VM's
-Pi process environment; MCP children inherit it. The project directory's
-`.env` is not read by the VM launcher. The host's general filesystem, host Pi
-sessions, SSH agent, USB devices, sound, and normal macOS command integration
+Pi process environment; MCP children inherit it. When present during
+`pi-update`, the host Laravel Cloud CLI config at
+`~/.config/cloud/config.json` is also copied into the template. The project
+directory's `.env` is not read by the VM launcher. The host's general
+filesystem, host Pi sessions, SSH agent, USB devices, sound, and normal macOS
+command integration
 are not shared.
 
 ## Network policy

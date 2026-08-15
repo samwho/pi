@@ -24,6 +24,7 @@ disk_bytes() {
 
 pi_dir="${PI_CONFIG_DIR:-$HOME/.pi}"
 host_npm="$pi_dir/agent/npm"
+host_cloud_config="$HOME/.config/cloud/config.json"
 
 # Copy the host's generic agent-skill directory into the persistent template.
 # Skills are installed and updated by host tools such as `cloud`; VM
@@ -125,6 +126,20 @@ if [[ -f "$repo_root/.env" ]]; then
   orb -m "$template" -u root chmod 0600 /home/pi/.pi/.env
 else
   orb -m "$template" -u root rm -f /home/pi/.pi/.env
+fi
+
+# Copy the host Laravel Cloud CLI credentials into the persistent template when
+# present. This is intentionally a pragmatic credential projection; the
+# template copy is inherited by newly cloned project VMs.
+if [[ -f "$host_cloud_config" ]]; then
+  echo "Copying host Laravel Cloud CLI config into $template..."
+  orb -m "$template" -u root mkdir -p /home/pi/.config/cloud
+  orb -m "$template" -u root chown pi:pi /home/pi/.config/cloud
+  orb -m "$template" -u root chmod 0700 /home/pi/.config/cloud
+  cat "$host_cloud_config" |
+    orb -m "$template" -u root tee /home/pi/.config/cloud/config.json >/dev/null
+  orb -m "$template" -u root chown pi:pi /home/pi/.config/cloud/config.json
+  orb -m "$template" -u root chmod 0600 /home/pi/.config/cloud/config.json
 fi
 
 # PyInfra connects through OrbStack's built-in localhost-only SSH server. uv

@@ -10,7 +10,7 @@
   "defaultProjectTrust": "ask",
   "showCacheMissNotices": true,
   "pi-gpt-fast-mode": {
-    "enabled": false
+    "enabled": true
   },
   "terminal": {
     "showTerminalProgress": true
