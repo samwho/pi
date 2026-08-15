@@ -5,8 +5,9 @@ description: >-
   modifying, or debugging .talon, .talon-list, .py, or .snippet user files;
   defining voice commands, actions, captures, lists, contexts, tags, modes,
   scopes, settings, or app integrations; voice-coding workflows; or Talon
-  installation, reload, speech-recognition, and REPL troubleshooting. Trigger
-  even when the user only describes a hands-free desktop or voice-coding
+  installation, reload, speech-recognition, and REPL troubleshooting; or
+  integrating with the talonhub/community user fileset and its conventions.
+  Trigger even when the user only describes a hands-free desktop or voice-coding
   problem without naming the file format.
 license: MIT
 compatibility: Talon Voice 0.4.x conventions; verify behavior against the installed Talon version and user file set.
@@ -28,18 +29,46 @@ commands and actions.
 1. Identify the Talon version, OS, speech engine, user-file-set root, and the
    application/context involved. Do not assume `~/.talon` is the right path on
    Windows (`%APPDATA%\Talon`) or that the user has Talon Community installed.
-2. Inspect the existing files and conventions before editing. Search for the
-   action, list, tag, spoken form, or context that the user mentions; do not
-   invent an action name merely because it sounds plausible.
+2. Inspect the existing files and conventions before editing. Search the whole
+   loaded user directory, including `~/.talon/user/community` when present, for
+   the action, list, tag, spoken form, or context that the user mentions; do not
+   invent an action name merely because it sounds plausible. Read the relevant
+   Community contract and its consuming app/language implementation first.
 3. Determine ownership. Keep personal additions in a separate user fileset
    alongside `community`; avoid changing upstream/community files unless the
-   user explicitly requests a fork or upstream contribution.
+   user explicitly requests a fork or upstream contribution. Check git status
+   before touching a Community checkout so runtime-generated files are not
+   mistaken for changes to clean up.
 4. Load only the reference needed for the task:
    - [Talon files and grammar](references/talon-files.md)
    - [Python framework and API](references/python-framework.md)
    - [Operations and debugging](references/debugging-and-operations.md)
    - [Voice coding](references/voice-coding.md)
    - [Sources and version notes](references/source-index.md)
+   - [Community compatibility](references/community.md)
+
+## Community compatibility gate
+
+When Community is installed, treat the checked-out repository as the practical
+source of truth for the commands and contracts Talon actually loads. Read
+`community/README.md`, `PRACTICES.md`, `CONTRIBUTING.md`, the relevant
+`apps/`, `tags/`, `lang/`, or `core/` files, and its `.pre-commit-config.yaml`
+and `pyproject.toml` before making a non-trivial integration. Follow the
+repository-specific architecture: reusable tags declare action contracts in
+Python and expose grammar in `.talon`; app/language files activate only the
+tags they support and implement those contracts in a narrow `Context`.
+
+Prefer existing Community `app.*`, `edit.*`, `win.*`, `code.*`, and `user.*`
+actions, tags, lists, captures, formatters, and snippets over parallel personal
+names. Put personal grammar/behavior next to Community rather than editing the
+checkout. For a standard Community contract, it is appropriate for a personal
+Context to implement an action such as `app.tab_next`; for new personal APIs,
+use a distinctive `user.` prefix. Preserve Community's object-then-verb command
+style, stable app matchers (`app.bundle` on macOS, the documented Windows
+forms, and `browser.host` for web apps), `.talon-list` preference, explicit tag
+activation, non-no-op action contract, short non-blocking behavior, and
+pre-commit/test expectations. Read [Community compatibility](references/community.md)
+for the detailed checklist and validation workflow.
 
 ## Choose the right file
 

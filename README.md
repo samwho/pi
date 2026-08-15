@@ -205,6 +205,7 @@ allowed credentials in the host Pi configuration.
 | `agent/bin/pi-delete` | Deletes all persistent VMs and in-VM state for the current project/profile, refusing while any are active. |
 | `agent/bin/pi-update` | Creates the template if absent and runs incremental PyInfra convergence. |
 | `agent/bin/pi-diff` | Starts the template if necessary and previews PyInfra operations and file diffs. |
+| `agent/tsconfig.json` | TypeScript project configuration for checking global extensions in Neovim. |
 | `pyproject.toml`, `uv.lock` | Locked Python/PyInfra project used by updates and editor tooling. |
 | `vm/pyinfra/inventory.py` | Connects PyInfra to the template through OrbStack's built-in SSH server. |
 | `vm/pyinfra/deploy.py` | Declarative packages, users, files, services, and tool state. |

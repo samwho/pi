@@ -7,7 +7,7 @@ import {
 	type ExtensionAPI,
 	type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { hyperlink, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 type JsonObject = Record<string, unknown>;
 type ResourceCounts = {
@@ -18,19 +18,45 @@ type ResourceCounts = {
 type Quote = {
 	text: string;
 	author: string;
+	wikipediaUrl?: string;
 };
 
 const EXTENSION_SUFFIXES = new Set([".cjs", ".js", ".mjs", ".ts", ".tsx"]);
-const QUOTES: Quote[] = [
+const FALLBACK_QUOTES: Quote[] = [
 	{ text: "The best way out is always through.", author: "Robert Frost" },
-	{
-		text: "Great things are done by a series of small things brought together.",
-		author: "Vincent van Gogh",
-	},
-	{ text: "Start where you are. Use what you have. Do what you can.", author: "Arthur Ashe" },
 	{ text: "Well begun is half done.", author: "Aristotle" },
 	{ text: "Make it work, make it right, make it fast.", author: "Kent Beck" },
 ];
+const QUOTE_ENDPOINT = process.env.PI_QUOTES_URL ?? "https://quotes.samwho.dev/random";
+
+function fallbackQuote(): Quote {
+	return FALLBACK_QUOTES[Math.floor(Math.random() * FALLBACK_QUOTES.length)] ?? FALLBACK_QUOTES[0];
+}
+
+function parseQuote(value: unknown): Quote | undefined {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+	const payload = value as Record<string, unknown>;
+	if (typeof payload.text !== "string" || typeof payload.author !== "string") return undefined;
+	return {
+		text: payload.text,
+		author: payload.author,
+		wikipediaUrl: typeof payload.wikipedia_url === "string" ? payload.wikipedia_url : undefined,
+	};
+}
+
+async function fetchQuote(): Promise<Quote | undefined> {
+	try {
+		const response = await fetch(QUOTE_ENDPOINT, {
+			headers: { Accept: "application/json" },
+			signal: AbortSignal.timeout(3_000),
+		});
+		if (!response.ok) return undefined;
+		return parseQuote(await response.json());
+	} catch {
+		// A temporarily unavailable quote server should never prevent Pi from starting.
+		return undefined;
+	}
+}
 
 function readObject(path: string): JsonObject | undefined {
 	try {
@@ -438,7 +464,12 @@ export default function (pi: ExtensionAPI): void {
 		if (ctx.mode !== "tui") return;
 
 		const startedAt = new Date();
-		const quote = QUOTES[Math.floor(Math.random() * QUOTES.length)] ?? QUOTES[0];
+		let quote = fallbackQuote();
+		void fetchQuote().then((remoteQuote) => {
+			if (!remoteQuote) return;
+			quote = remoteQuote;
+			requestHeaderRender?.();
+		});
 		const counts: ResourceCounts = {
 			contexts: countContextFiles(ctx),
 			skills: countLoadedSkills(pi, ctx),
@@ -458,37 +489,37 @@ export default function (pi: ExtensionAPI): void {
 
 			return {
 				render(width: number): string[] {
-					const innerWidth = width - 4;
-					if (innerWidth < 8) return [truncateToWidth(theme.fg("accent", "✦ PI"), width, "")];
+					if (width < 8) return [truncateToWidth(theme.fg("accent", "✦"), width, "")];
 
-					const border = (text: string) => theme.fg("borderAccent", text);
-					const row = (content: string) => {
-						const fitted = truncateToWidth(content, innerWidth, "");
-						const padding = " ".repeat(Math.max(0, innerWidth - visibleWidth(fitted)));
-						return `${border("│")} ${fitted}${padding} ${border("│")}`;
-					};
-					const label = (icon: string, name: string) =>
-						`${theme.fg("accent", icon)} ${theme.bold(name.padEnd(9))}`;
+					const row = (content: string) => truncateToWidth(content, width, "");
+					const label = (name: string) => theme.fg("muted", theme.bold(name.padStart(9)));
 					const number = (value: number) => theme.fg("success", String(value));
-
-					const quoteText = `“${quote.text}” — ${quote.author}`;
-					const quoteRows = wrapText(quoteText, Math.max(1, innerWidth - 2)).map((line, index) =>
-						row(`${index === 0 ? theme.fg("warning", "❝") : " "} ${theme.fg("muted", line)}`),
-					);
+					const displayCounts = activeCounts ?? counts;
+					const quoteText = `“${quote.text}”`;
+					const quoteLines = wrapText(quoteText, Math.max(1, width - 2));
+					const author = quote.wikipediaUrl
+						? hyperlink(
+								theme.fg("accent", theme.underline(`— ${quote.author}`)),
+								quote.wikipediaUrl,
+						  )
+						: theme.fg("accent", `— ${quote.author}`);
+					const quoteRows = [
+						...quoteLines.map((line) =>
+							row(`${theme.fg("borderMuted", "│")} ${theme.fg("muted", line)}`),
+						),
+						row(`${theme.fg("borderMuted", "│")} ${author}`),
+					];
 
 					return [
-						border(`╭${"─".repeat(innerWidth + 2)}╮`),
-						row(`${theme.fg("accent", "✦")} ${theme.bold("PI")} ${theme.fg("muted", "SESSION READY")}`),
 						row(
-							`${label("◈", "RESOURCES")} ${number(counts.contexts)} contexts  ${number(counts.skills)} skills  ${number(counts.extensions)} extensions`,
+							`${label("resources")}  ${number(displayCounts.contexts)} contexts  ${number(displayCounts.skills)} skills  ${number(displayCounts.extensions)} extensions`,
 						),
-						row(`${label("◉", "SYSTEM")} ${theme.fg("success", system.os)}`),
-						row(`${label("◆", "HOST")} ${theme.fg("muted", system.host)}`),
-						row(`${label("◷", "LOCAL")} ${theme.fg("warning", system.time)}`),
-						row(`${label("⌂", "DIRECTORY")} ${theme.fg("text", system.directory)}`),
-						row(theme.fg("borderMuted", "·".repeat(innerWidth))),
+						row(`${label("system")}  ${theme.fg("success", system.os)}`),
+						row(`${label("host")}  ${theme.fg("muted", system.host)}`),
+						row(`${label("local")}  ${theme.fg("warning", system.time)}`),
+						row(`${label("directory")}  ${theme.fg("text", system.directory)}`),
+						"",
 						...quoteRows,
-						border(`╰${"─".repeat(innerWidth + 2)}╯`),
 					];
 				},
 				invalidate() {},
