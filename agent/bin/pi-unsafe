@@ -17,16 +17,7 @@ export FACELIFT_MAX_PREVIEW_LINES=10
 export LLAMA_BASE_URL="${LLAMA_BASE_URL:-http://127.0.0.1:8080}"
 export PI_OFFLINE=1
 
-exec mise exec -q node@latest -- bash -c '
-set -euo pipefail
-
-node_bin_dir="$(dirname "$(command -v node)")"
-pi_path="$node_bin_dir/pi"
-
-if [[ ! -x "$pi_path" ]]; then
-  npm install --global --ignore-scripts @earendil-works/pi-coding-agent
-fi
-
+# pi-update declares Pi as an npm-backed mise tool. Run from HOME so a
+# project's tool configuration cannot select a different Pi installation.
 # pi-web-search also registers Gemini-only url_context; expose only web_search.
-exec "$pi_path" "$@" --exclude-tools url_context
-' pi "$@"
+exec mise exec -q -C "$HOME" -- pi "$@" --exclude-tools url_context

@@ -78,17 +78,55 @@ update_template_extension_dependencies() {
     /usr/local/bin/pi-agent-dependencies
 }
 
+# These host tools support the Pi launcher and its globally loaded extensions.
+# Keep them declarative in mise rather than relying on Homebrew or Node's global
+# package prefix. Betterleaks uses Aqua because it is not a core mise backend.
+echo "Ensuring host Pi tools are installed through mise..."
+mise use --global \
+  node@latest \
+  uv@latest \
+  aqua:betterleaks/betterleaks@latest \
+  npm:chrome-devtools-mcp@latest \
+  npm:@earendil-works/pi-coding-agent@latest
+
 # Update extensions in the host installation, never through the VM launcher
 # at ~/.pi/agent/bin/pi. The refreshed host npm manifests are copied into the
 # template below, where their Linux-native optional dependencies are rebuilt.
-host_node_root="$(mise where node@latest 2>/dev/null || true)"
-host_pi="$host_node_root/bin/pi"
+host_node_root="$(mise where -C "$HOME" node@latest 2>/dev/null || true)"
+host_pi_root="$(mise where -C "$HOME" npm:@earendil-works/pi-coding-agent 2>/dev/null || true)"
+host_pi="$host_pi_root/node_modules/.bin/pi"
 if [[ ! -x "$host_pi" ]]; then
-  echo "Could not find the host Pi CLI under mise's node@latest installation." >&2
+  echo "Could not find the host Pi CLI installed through mise." >&2
   exit 1
 fi
 echo "Updating host Pi extensions..."
-"$host_pi" update --extensions
+mise exec -q -C "$HOME" -- "$host_pi" update --extensions
+
+# @pi-plugins/usage pins Effect 4 beta dependencies, but npm can select an
+# incompatible release-candidate platform peer. Keep the extension's runtime
+# tree resolvable on both macOS and Linux before copying its lockfile to VMs.
+if [[ -f "$host_npm/package.json" ]] && \
+  "$host_node_root/bin/node" -e \
+    'process.exit(require(process.argv[1]).dependencies?.["@pi-plugins/usage"] ? 0 : 1)' \
+    "$host_npm/package.json"; then
+  echo "Reconciling @pi-plugins/usage runtime dependencies..."
+  "$host_node_root/bin/npm" pkg set --prefix "$host_npm" \
+    'overrides.@effect/platform-node-shared=4.0.0-beta.103' \
+    'dependencies.effect=4.0.0-beta.103' \
+    'dependencies.ioredis=^5.7.0'
+  "$host_node_root/bin/npm" install --prefix "$host_npm" \
+    --package-lock-only --legacy-peer-deps --ignore-scripts --no-audit --no-fund
+  "$host_node_root/bin/npm" ci --prefix "$host_npm" \
+    --include=optional --legacy-peer-deps --ignore-scripts --no-audit --no-fund
+fi
+
+# Pi used to be installed directly into mise's Node prefix. Remove that legacy
+# copy only after the mise-managed replacement is available, so the Node prefix
+# no longer shadows mise's managed Pi executable.
+if [[ -x "$host_node_root/bin/npm" && -x "$host_node_root/bin/pi" ]]; then
+  echo "Removing legacy Pi installation from mise's Node prefix..."
+  "$host_node_root/bin/npm" uninstall --global --ignore-scripts @earendil-works/pi-coding-agent
+fi
 
 if ! orb info "$template" >/dev/null 2>&1; then
   echo "Creating persistent isolated Arch ARM64 template $template..."

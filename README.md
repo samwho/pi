@@ -31,7 +31,7 @@ behavior; use `pi -c "..."` to continue with an initial prompt.
 `pi-diff` uses Rich to render only operations that would change and includes
 syntax-highlighted unified diffs for managed files, avoiding PyInfra's
 full-width all-operations table.
-`pi-update` first updates extensions in the host Pi installation, then converges
+`pi-update` first ensures host Node, uv, Betterleaks, Pi, and Chrome DevTools MCP are installed through mise, updates host Pi extensions, then converges
 the persistent template in place with PyInfra, retaining pacman, npm, mise, and
 container caches. It installs current Arch packages, including PHP, Composer,
 Laravel-friendly PHP extensions, SQLite, and the frontend toolchain; the latest
