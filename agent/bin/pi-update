@@ -176,9 +176,11 @@ orb -m "$template" -u pi bash -lc '
   command -v php >/dev/null
   command -v composer >/dev/null
   command -v cloud >/dev/null
+  command -v betterleaks >/dev/null
   php --version >/dev/null
   composer --version >/dev/null
   cloud --version >/dev/null
+  betterleaks --version >/dev/null
   for extension in bcmath ctype curl dom exif fileinfo gd iconv intl mbstring mysqli openssl PDO pdo_mysql pdo_pgsql pdo_sqlite redis soap sqlite3 tokenizer xml xsl zip; do
     php -m | grep -Fx "$extension" >/dev/null
   done

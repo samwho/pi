@@ -338,6 +338,7 @@ mise_tools(
         "bun@latest",
         "rust@latest",
         "uv@latest",
+        "betterleaks@latest",
         "python@latest",
         "npm:pnpm@latest",
         "npm:@biomejs/biome@latest",

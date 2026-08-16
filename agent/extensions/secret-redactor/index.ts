@@ -1,9 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
-
-const extensionRoot = fileURLToPath(new URL(".", import.meta.url));
-const betterleaksTool = "aqua:betterleaks/betterleaks@1.7.4";
 
 type Finding = {
 	StartLine: number;
@@ -18,12 +14,8 @@ type Finding = {
 function scan(text: string, signal?: AbortSignal): Promise<Finding[]> {
 	return new Promise((resolve, reject) => {
 		const child = spawn(
-			"mise",
+			"betterleaks",
 			[
-				"exec",
-				betterleaksTool,
-				"--",
-				"betterleaks",
 				"stdin",
 				"--no-banner",
 				"--log-level",
@@ -41,8 +33,6 @@ function scan(text: string, signal?: AbortSignal): Promise<Finding[]> {
 				"0",
 			],
 			{
-				cwd: extensionRoot,
-				// Do not allow a project or user config to weaken the scan.
 				env: { PATH: process.env.PATH },
 				stdio: ["pipe", "pipe", "pipe"],
 			},
@@ -53,6 +43,11 @@ function scan(text: string, signal?: AbortSignal): Promise<Finding[]> {
 		child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf8"); });
 		child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString("utf8"); });
 		child.on("error", reject);
+		// A scanner that exits early closes stdin before this process can finish
+		// writing. Handle that expected EPIPE instead of crashing Pi.
+		child.stdin.on("error", (error: NodeJS.ErrnoException) => {
+			if (error.code !== "EPIPE") reject(error);
+		});
 		child.on("close", (code) => {
 			if (code !== 0) {
 				reject(new Error(`betterleaks exited with code ${code}: ${stderr}`));
@@ -148,22 +143,21 @@ async function redactContent<T extends { type: string; text?: string }>(
 
 async function redactDetails(value: unknown, signal?: AbortSignal): Promise<unknown> {
 	if (typeof value === "string") return redact(value, signal);
+	if (value === null || typeof value !== "object") return value;
 
-	if (Array.isArray(value)) {
-		return Promise.all(value.map((item) => redactDetails(item, signal)));
+	// Scan a structured result as one JSON document. The previous recursive
+	// Promise.all implementation spawned one Betterleaks process per string, so
+	// a web-search response with many raw source fields could launch
+	// hundreds of concurrent scanners and OOM a 4 GiB VM.
+	try {
+		const json = JSON.stringify(value);
+		if (json === undefined) return value;
+		return JSON.parse(await redact(json, signal));
+	} catch {
+		// Details are diagnostic metadata. Withhold them rather than risk exposing
+		// an unscanned value if serialization or redaction cannot complete.
+		return { _type: "redactionFailed" };
 	}
-
-	if (value !== null && typeof value === "object") {
-		const entries = await Promise.all(
-			Object.entries(value).map(async ([key, item]) => [
-				key,
-				await redactDetails(item, signal),
-			]),
-		);
-		return Object.fromEntries(entries);
-	}
-
-	return value;
 }
 
 export default function (pi: ExtensionAPI): void {
@@ -176,6 +170,10 @@ export default function (pi: ExtensionAPI): void {
 	// under the same names discards those wrappers. tool_result is middleware,
 	// so it redacts the final result from whichever implementation is active.
 	pi.on("tool_result", async (event, ctx) => {
+		// Search results are provider-produced public web content; skip the
+		// expensive scanner entirely so source-heavy responses stay lightweight.
+		if (event.toolName === "web_search") return;
+
 		try {
 			const [content, details] = await Promise.all([
 				redactContent(event.content, ctx.signal),
