@@ -186,12 +186,15 @@ sandbox_term="${TERM:-xterm-256color}"
 if (( $# == 0 )); then
   set -- -c
 fi
+# pi-web-search also registers Gemini-only url_context; expose only web_search.
+set -- "$@" --exclude-tools url_context
 
 guest_env=(
   "TERM=$sandbox_term"
   "COLORTERM=${COLORTERM:-}"
   "TERM_PROGRAM=${TERM_PROGRAM:-}"
   "LLAMA_BASE_URL=$llama_base_url"
+  "PI_OFFLINE=1"
   "PI_SKIP_VERSION_CHECK=1"
 )
 if [[ -n "${LLAMA_API_KEY:-}" ]]; then

@@ -1,10 +1,15 @@
+import { highlightCode, type ExtensionAPI, type Theme } from "@earendil-works/pi-coding-agent";
+import { visibleWidth, type Component } from "@earendil-works/pi-tui";
+import { DynamicText } from "./shared/dynamic-text.ts";
 import {
-	highlightCode,
-	ToolExecutionComponent,
-	type ExtensionAPI,
-	type Theme,
-} from "@earendil-works/pi-coding-agent";
-import { truncateToWidth, visibleWidth, type Component } from "@earendil-works/pi-tui";
+	frameBodyLines,
+	frameBottom as sharedFrameBottom,
+	frameBottomWithLabel,
+	frameTop as sharedFrameTop,
+	getFrameStatus,
+	type FrameStatus,
+} from "./shared/tool-frame.ts";
+import { registerToolRenderer, type ToolRenderContext } from "./shared/tool-renderer-patch.ts";
 
 /**
  * The MCP adapter owns mcpScript's execution, so re-registering the tool would
@@ -21,17 +26,8 @@ const MAX_COLLAPSED_TRACE_LINES = 6;
 const MAX_EXPANDED_TRACE_LINES = 100;
 const MAX_COLLAPSED_OUTPUT_LINES = 6;
 const MAX_EXPANDED_OUTPUT_LINES = 300;
-const PATCH = Symbol.for("pi.mcp-script-renderer.patch");
-
-type FrameStatus = "pending" | "success" | "error";
-
 type RenderTheme = Pick<Theme, "fg" | "bold">;
-
-type RenderContext = {
-	expanded?: boolean;
-	isError?: boolean;
-	isPartial?: boolean;
-};
+type RenderContext = ToolRenderContext;
 
 type ScriptArgs = {
 	code?: unknown;
@@ -69,85 +65,22 @@ type ScriptCall = {
 	durationMs?: unknown;
 };
 
-type InternalToolExecution = {
-	toolName?: unknown;
-};
-
-type Renderer = (
-	args: unknown,
-	theme: Theme,
-	context: RenderContext,
-) => Component;
-
-type ResultRenderer = (
-	result: ScriptResult,
-	options: { expanded: boolean; isPartial: boolean },
-	theme: Theme,
-	context: RenderContext,
-) => Component;
-
-type ToolExecutionPrototype = Record<string | symbol, unknown>;
-type PatchState = {
-	originalCallRenderer: (...args: unknown[]) => unknown;
-	originalResultRenderer: (...args: unknown[]) => unknown;
-	originalRenderShell: (...args: unknown[]) => unknown;
-	callRenderer: Renderer;
-	resultRenderer: ResultRenderer;
-	proxyCallRenderer: Renderer;
-	proxyResultRenderer: ResultRenderer;
-};
-
-/** A width-aware component for a renderer that needs to draw its own frame. */
-class DynamicText implements Component {
-	constructor(private readonly renderText: (width: number) => string) {}
-
-	render(width: number): string[] {
-		const safeWidth = Math.max(1, Math.floor(width));
-		return this.renderText(safeWidth)
-			.split("\n")
-			.map((line) => truncateToWidth(line, safeWidth, ""));
-	}
-
-	invalidate(): void {}
-}
-
 function statusFor(context: RenderContext): FrameStatus {
-	if (context.isError) return "error";
-	if (context.isPartial) return "pending";
-	return "success";
+	return getFrameStatus(context);
 }
 
-function statusColor(status: FrameStatus): "warning" | "success" | "error" {
-	if (status === "pending") return "warning";
-	if (status === "error") return "error";
-	return "success";
+function frameTop(theme: Theme, status: FrameStatus, title: string, width: number): string {
+	return sharedFrameTop(title, status, theme, width);
 }
 
-function border(theme: RenderTheme, status: FrameStatus, text: string): string {
-	return theme.fg(statusColor(status), text);
+function frameBodyLine(theme: Theme, status: FrameStatus, line: string, width: number): string {
+	return frameBodyLines(line, status, theme, width, { paddingX: 1 });
 }
 
-function frameTop(theme: RenderTheme, status: FrameStatus, title: string, width: number): string {
-	if (width < 6) return truncateToWidth(title, width, "");
-
-	const maxTitleWidth = Math.max(1, width - 6);
-	const fittedTitle = truncateToWidth(title, maxTitleWidth, "…");
-	const trailing = Math.max(1, width - visibleWidth(fittedTitle) - 5);
-	return `${border(theme, status, "╭──")} ${fittedTitle} ${border(theme, status, "─".repeat(trailing))}`;
-}
-
-function frameBodyLine(theme: RenderTheme, status: FrameStatus, line: string, width: number): string {
-	if (width === 1) return border(theme, status, "│");
-	const innerWidth = Math.max(1, width - 2);
-	return `${border(theme, status, "│")} ${truncateToWidth(line, innerWidth, "…")}`;
-}
-
-function frameBottom(theme: RenderTheme, status: FrameStatus, label: string, width: number): string {
-	if (width < 2) return border(theme, status, "╰");
-
-	const fittedLabel = truncateToWidth(label, Math.max(1, width - 6), "…");
-	const trailing = Math.max(1, width - visibleWidth(fittedLabel) - 5);
-	return `${border(theme, status, "╰──")} ${fittedLabel} ${border(theme, status, "─".repeat(trailing))}`;
+function frameBottom(theme: Theme, status: FrameStatus, label: string, width: number): string {
+	return label
+		? frameBottomWithLabel(label, status, theme, width)
+		: sharedFrameBottom(status, theme, width);
 }
 
 /** A clear in-frame boundary between the call request above and its result. */
@@ -455,61 +388,15 @@ function renderProxyResult(
 	});
 }
 
-function installPatch(): void {
-	const prototype = ToolExecutionComponent.prototype as unknown as ToolExecutionPrototype;
-	const existing = prototype[PATCH] as PatchState | undefined;
-	if (existing) {
-		// `/reload` re-evaluates this extension while Pi keeps the TUI class
-		// module alive. Update the closures so source changes take effect without
-		// stacking another prototype patch.
-		existing.callRenderer = renderCall;
-		existing.resultRenderer = renderResult;
-		existing.proxyCallRenderer = renderProxyCall;
-		existing.proxyResultRenderer = renderProxyResult;
-		return;
-	}
-
-	const originalCallRenderer = prototype.getCallRenderer;
-	const originalResultRenderer = prototype.getResultRenderer;
-	const originalRenderShell = prototype.getRenderShell;
-	if (
-		typeof originalCallRenderer !== "function" ||
-		typeof originalResultRenderer !== "function" ||
-		typeof originalRenderShell !== "function"
-	) {
-		console.warn("mcp-script-renderer: Pi's tool renderer API is unavailable; leaving the default mcpScript renderer in place.");
-		return;
-	}
-
-	const state: PatchState = {
-		originalCallRenderer: originalCallRenderer as (...args: unknown[]) => unknown,
-		originalResultRenderer: originalResultRenderer as (...args: unknown[]) => unknown,
-		originalRenderShell: originalRenderShell as (...args: unknown[]) => unknown,
-		callRenderer: renderCall,
-		resultRenderer: renderResult,
-		proxyCallRenderer: renderProxyCall,
-		proxyResultRenderer: renderProxyResult,
-	};
-	Object.defineProperty(prototype, PATCH, { value: state, configurable: false });
-
-	prototype.getRenderShell = function (this: InternalToolExecution): unknown {
-		if (this.toolName === MCP_SCRIPT || this.toolName === MCP_PROXY) return "self";
-		return state.originalRenderShell.call(this);
-	};
-	prototype.getCallRenderer = function (this: InternalToolExecution): unknown {
-		if (this.toolName === MCP_SCRIPT) return state.callRenderer;
-		if (this.toolName === MCP_PROXY) return state.proxyCallRenderer;
-		return state.originalCallRenderer.call(this);
-	};
-	prototype.getResultRenderer = function (this: InternalToolExecution): unknown {
-		if (this.toolName === MCP_SCRIPT) return state.resultRenderer;
-		if (this.toolName === MCP_PROXY) return state.proxyResultRenderer;
-		return state.originalResultRenderer.call(this);
-	};
-}
-
 export default function (_pi: ExtensionAPI): void {
-	installPatch();
+	registerToolRenderer([MCP_SCRIPT], {
+		renderCall: (_toolName, args, theme, context) => renderCall(args, theme, context),
+		renderResult: (_toolName, result, options, theme, context) => renderResult(result as ScriptResult, options, theme, context),
+	});
+	registerToolRenderer([MCP_PROXY], {
+		renderCall: (_toolName, args, theme, context) => renderProxyCall(args, theme, context),
+		renderResult: (_toolName, result, options, theme, context) => renderProxyResult(result as ScriptResult, options, theme, context),
+	});
 }
 
 export const __mcpScriptRendererInternals = {

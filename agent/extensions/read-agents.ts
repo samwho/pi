@@ -108,6 +108,15 @@ async function fileExists(filePath: string): Promise<boolean> {
 export default function (pi: ExtensionAPI) {
 	const completedReadPaths = new Set<string>();
 
+	// Context files are already included in Pi's initial system prompt. Record
+	// those paths before the first tool call so the agent is not asked to read
+	// an AGENTS.md file it has already received as prompt context.
+	pi.on("before_agent_start", (event, ctx) => {
+		for (const contextFile of event.systemPromptOptions.contextFiles ?? []) {
+			completedReadPaths.add(normalizePath(ctx.cwd, contextFile.path));
+		}
+	});
+
 	// Gate every read implementation, including tools supplied by other extensions.
 	// This keeps the policy layered on top of wrappers such as pi-pretty instead of
 	// competing with them for ownership of the `read` tool name.
