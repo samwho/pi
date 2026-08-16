@@ -3,14 +3,14 @@
   "theme": "dark",
   "quietStartup": true,
   "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-5.6-luna",
-  "defaultThinkingLevel": "max",
-  "tuiMode": "regular",
+  "defaultModel": "gpt-5.6-terra",
+  "defaultThinkingLevel": "medium",
+  "tuiMode": "fullscreen",
   "fullscreenScrollbar": "hidden",
   "defaultProjectTrust": "ask",
   "showCacheMissNotices": true,
   "pi-gpt-fast-mode": {
-    "enabled": true
+    "enabled": false
   },
   "terminal": {
     "showTerminalProgress": true

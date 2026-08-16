@@ -22,16 +22,9 @@ type Quote = {
 };
 
 const EXTENSION_SUFFIXES = new Set([".cjs", ".js", ".mjs", ".ts", ".tsx"]);
-const FALLBACK_QUOTES: Quote[] = [
-	{ text: "The best way out is always through.", author: "Robert Frost" },
-	{ text: "Well begun is half done.", author: "Aristotle" },
-	{ text: "Make it work, make it right, make it fast.", author: "Kent Beck" },
-];
 const QUOTE_ENDPOINT = process.env.PI_QUOTES_URL ?? "https://quotes.samwho.dev/random";
-
-function fallbackQuote(): Quote {
-	return FALLBACK_QUOTES[Math.floor(Math.random() * FALLBACK_QUOTES.length)] ?? FALLBACK_QUOTES[0];
-}
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const SPINNER_INTERVAL_MS = 120;
 
 function parseQuote(value: unknown): Quote | undefined {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
@@ -459,15 +452,37 @@ function wrapText(text: string, width: number): string[] {
 export default function (pi: ExtensionAPI): void {
 	let activeCounts: ResourceCounts | undefined;
 	let requestHeaderRender: (() => void) | undefined;
+	let stopQuoteLoading: (() => void) | undefined;
 
 	pi.on("session_start", (_event, ctx) => {
 		if (ctx.mode !== "tui") return;
 
+		stopQuoteLoading?.();
 		const startedAt = new Date();
-		let quote = fallbackQuote();
+		let quote: Quote | undefined;
+		let quoteState: "loading" | "loaded" | "error" = "loading";
+		let spinnerIndex = 0;
+		let quoteLoadingActive = true;
+		let spinnerTimer: ReturnType<typeof setInterval> | undefined;
+		const stopQuoteLoadingForSession = () => {
+			quoteLoadingActive = false;
+			if (spinnerTimer !== undefined) {
+				clearInterval(spinnerTimer);
+				spinnerTimer = undefined;
+			}
+		};
+		stopQuoteLoading = stopQuoteLoadingForSession;
+		spinnerTimer = setInterval(() => {
+			if (!quoteLoadingActive) return;
+			spinnerIndex = (spinnerIndex + 1) % SPINNER_FRAMES.length;
+			requestHeaderRender?.();
+		}, SPINNER_INTERVAL_MS);
+
 		void fetchQuote().then((remoteQuote) => {
-			if (!remoteQuote) return;
+			if (!quoteLoadingActive) return;
 			quote = remoteQuote;
+			quoteState = remoteQuote ? "loaded" : "error";
+			stopQuoteLoadingForSession();
 			requestHeaderRender?.();
 		});
 		const counts: ResourceCounts = {
@@ -495,20 +510,36 @@ export default function (pi: ExtensionAPI): void {
 					const label = (name: string) => theme.fg("muted", theme.bold(name.padStart(9)));
 					const number = (value: number) => theme.fg("success", String(value));
 					const displayCounts = activeCounts ?? counts;
-					const quoteText = `“${quote.text}”`;
-					const quoteLines = wrapText(quoteText, Math.max(1, width - 2));
-					const author = quote.wikipediaUrl
-						? hyperlink(
-								theme.fg("accent", theme.underline(`— ${quote.author}`)),
-								quote.wikipediaUrl,
-						  )
-						: theme.fg("accent", `— ${quote.author}`);
-					const quoteRows = [
-						...quoteLines.map((line) =>
-							row(`${theme.fg("borderMuted", "│")} ${theme.fg("muted", line)}`),
-						),
-						row(`${theme.fg("borderMuted", "│")} ${author}`),
-					];
+					let quoteRows: string[];
+					if (quoteState === "loading") {
+						const spinner = SPINNER_FRAMES[spinnerIndex] ?? SPINNER_FRAMES[0] ?? "?";
+						quoteRows = [
+							row(
+								`${theme.fg("borderMuted", "│")} ${theme.fg("accent", spinner)} ${theme.fg("muted", "Loading quote…")}`,
+							),
+						];
+					} else if (quoteState === "error" || !quote) {
+						quoteRows = [
+							row(
+								`${theme.fg("borderMuted", "│")} ${theme.fg("error", "Unable to load quote.")}`,
+							),
+						];
+					} else {
+						const quoteText = `“${quote.text}”`;
+						const quoteLines = wrapText(quoteText, Math.max(1, width - 2));
+						const author = quote.wikipediaUrl
+							? hyperlink(
+									theme.fg("accent", theme.underline(`— ${quote.author}`)),
+									quote.wikipediaUrl,
+							  )
+							: theme.fg("accent", `— ${quote.author}`);
+						quoteRows = [
+							...quoteLines.map((line) =>
+								row(`${theme.fg("borderMuted", "│")} ${theme.fg("muted", line)}`),
+							),
+							row(`${theme.fg("borderMuted", "│")} ${author}`),
+						];
+					}
 
 					return [
 						row(
@@ -524,10 +555,17 @@ export default function (pi: ExtensionAPI): void {
 				},
 				invalidate() {},
 				dispose() {
+					stopQuoteLoadingForSession();
+					if (stopQuoteLoading === stopQuoteLoadingForSession) stopQuoteLoading = undefined;
 					if (requestHeaderRender === renderHeader) requestHeaderRender = undefined;
 				},
 			};
 		});
+	});
+
+	pi.on("session_shutdown", () => {
+		stopQuoteLoading?.();
+		stopQuoteLoading = undefined;
 	});
 
 	pi.on("before_agent_start", (event, ctx) => {
