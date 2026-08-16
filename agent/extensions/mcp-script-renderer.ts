@@ -14,6 +14,7 @@ import { truncateToWidth, visibleWidth, type Component } from "@earendil-works/p
  */
 
 const MCP_SCRIPT = "mcpScript";
+const MCP_PROXY = "mcp";
 const MAX_COLLAPSED_CODE_LINES = 4;
 const MAX_EXPANDED_CODE_LINES = 160;
 const MAX_COLLAPSED_TRACE_LINES = 6;
@@ -35,6 +36,17 @@ type RenderContext = {
 type ScriptArgs = {
 	code?: unknown;
 	timeoutMs?: unknown;
+};
+
+type ProxyArgs = {
+	tool?: unknown;
+	args?: unknown;
+	connect?: unknown;
+	describe?: unknown;
+	instructions?: unknown;
+	search?: unknown;
+	server?: unknown;
+	action?: unknown;
 };
 
 type ScriptContent = {
@@ -81,6 +93,8 @@ type PatchState = {
 	originalRenderShell: (...args: unknown[]) => unknown;
 	callRenderer: Renderer;
 	resultRenderer: ResultRenderer;
+	proxyCallRenderer: Renderer;
+	proxyResultRenderer: ResultRenderer;
 };
 
 /** A width-aware component for a renderer that needs to draw its own frame. */
@@ -134,6 +148,13 @@ function frameBottom(theme: RenderTheme, status: FrameStatus, label: string, wid
 	const fittedLabel = truncateToWidth(label, Math.max(1, width - 6), "…");
 	const trailing = Math.max(1, width - visibleWidth(fittedLabel) - 5);
 	return `${border(theme, status, "╰──")} ${fittedLabel} ${border(theme, status, "─".repeat(trailing))}`;
+}
+
+/** A clear in-frame boundary between the call request above and its result. */
+function outputDivider(theme: RenderTheme, width: number): string {
+	const label = "┄┄ output ";
+	const tail = "┄".repeat(Math.max(1, width - visibleWidth(label)));
+	return `${theme.fg("muted", label)}${theme.fg("dim", tail)}`;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -213,17 +234,48 @@ function prettyOutputText(text: string): string[] {
 	return normalized.split("\n");
 }
 
+function isJson(text: string): boolean {
+	const trimmed = text.trim();
+	if (!((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]")))) return false;
+	try {
+		JSON.parse(trimmed);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+function outputLanguage(text: string, mimeType?: string): "json" | "markdown" | undefined {
+	if (mimeType?.includes("json") || isJson(text)) return "json";
+	const trimmed = text.trim();
+	if (/^(#{1,6}\s|[-*+]\s|>\s|```|\[[^\]]+\]\([^\)]+\))/m.test(trimmed)) return "markdown";
+	return undefined;
+}
+
+function highlightLines(lines: string[], language: "json" | "markdown" | undefined): string[] {
+	if (!language) return lines;
+	try {
+		return highlightCode(lines.join("\n"), language);
+	} catch {
+		return lines;
+	}
+}
+
 function outputLines(result: ScriptResult, theme: RenderTheme): string[] {
 	const lines: string[] = [];
 	for (const block of result.content ?? []) {
 		if (block.type === "text") {
-			for (const line of prettyOutputText(block.text ?? "")) {
-				if (line.startsWith("[console.error]")) {
-					lines.push(theme.fg("error", line));
-				} else if (line.startsWith("[console.warn]")) {
-					lines.push(theme.fg("warning", line));
-				} else if (line.startsWith("[console.")) {
-					lines.push(theme.fg("accent", line));
+			const plain = prettyOutputText(block.text ?? "");
+			const highlighted = highlightLines(plain, outputLanguage(block.text ?? "", block.mimeType));
+			for (let index = 0; index < highlighted.length; index++) {
+				const original = plain[index] ?? "";
+				const line = highlighted[index] ?? original;
+				if (original.startsWith("[console.error]")) {
+					lines.push(theme.fg("error", original));
+				} else if (original.startsWith("[console.warn]")) {
+					lines.push(theme.fg("warning", original));
+				} else if (original.startsWith("[console.")) {
+					lines.push(theme.fg("accent", original));
 				} else {
 					lines.push(theme.fg("toolOutput", line));
 				}
@@ -233,6 +285,44 @@ function outputLines(result: ScriptResult, theme: RenderTheme): string[] {
 		}
 	}
 	return lines.length > 0 ? lines : [theme.fg("dim", "(no output)")];
+}
+
+function formatJson(value: unknown): string[] {
+	if (typeof value === "string") {
+		try {
+			return JSON.stringify(JSON.parse(value), null, 2).split("\n");
+		} catch {
+			return value.split("\n");
+		}
+	}
+	try {
+		return JSON.stringify(value, null, 2).split("\n");
+	} catch {
+		return [String(value)];
+	}
+}
+
+function proxyDescription(args: ProxyArgs): string {
+	if (asString(args.tool)) return `call ${asString(args.tool)}${asString(args.server) ? ` @ ${asString(args.server)}` : ""}`;
+	if (asString(args.connect)) return `connect ${asString(args.connect)}`;
+	if (asString(args.describe)) return `describe ${asString(args.describe)}`;
+	if (asString(args.instructions)) return `instructions ${asString(args.instructions)}`;
+	if (asString(args.search)) return `search ${asString(args.search)}${asString(args.server) ? ` @ ${asString(args.server)}` : ""}`;
+	if (asString(args.server)) return `list ${asString(args.server)}`;
+	if (asString(args.action)) return asString(args.action)!;
+	return "status";
+}
+
+function proxyInputLines(args: ProxyArgs, theme: RenderTheme, expanded: boolean): string[] {
+	if (args.args === undefined) return [theme.fg("dim", "(no arguments)")];
+	const lines = formatJson(args.args);
+	const highlighted = highlightLines(lines, isJson(lines.join("\n")) ? "json" : undefined);
+	const limit = expanded ? MAX_EXPANDED_CODE_LINES : MAX_COLLAPSED_CODE_LINES;
+	const shown = highlighted.slice(0, limit).map((line) => theme.fg("toolOutput", line));
+	if (lines.length > limit) {
+		shown.push(theme.fg("muted", `… ${lines.length - limit} more line${lines.length - limit === 1 ? "" : "s"} · Ctrl+O to expand`));
+	}
+	return shown;
 }
 
 function codeLines(args: ScriptArgs, theme: RenderTheme, expanded: boolean): string[] {
@@ -274,6 +364,18 @@ function renderCall(argsValue: unknown, theme: Theme, context: RenderContext): C
 	});
 }
 
+function renderProxyCall(argsValue: unknown, theme: Theme, context: RenderContext): Component {
+	const args = (asRecord(argsValue) ?? {}) as ProxyArgs;
+	const status = statusFor(context);
+	const expanded = context.expanded === true;
+	const title = `${theme.fg("toolTitle", theme.bold(MCP_PROXY))} ${theme.fg("muted", `· ${proxyDescription(args)}`)}`;
+
+	return new DynamicText((width) => {
+		const body = proxyInputLines(args, theme, expanded).map((line) => frameBodyLine(theme, status, line, width));
+		return [frameTop(theme, status, title, width), ...body].join("\n");
+	});
+}
+
 function renderResult(
 	result: ScriptResult,
 	options: { expanded: boolean; isPartial: boolean },
@@ -311,7 +413,7 @@ function renderResult(
 			}
 		}
 
-		body.push(frameBodyLine(theme, status, theme.fg("muted", "output"), width));
+		body.push(frameBodyLine(theme, status, outputDivider(theme, Math.max(1, width - 2)), width));
 		body.push(...allOutput.slice(0, outputLimit).map((line) => frameBodyLine(theme, status, line, width)));
 		if (allOutput.length > outputLimit) {
 			body.push(frameBodyLine(theme, status, theme.fg("muted", `… ${allOutput.length - outputLimit} more output lines · Ctrl+O to expand`), width));
@@ -320,6 +422,36 @@ function renderResult(
 		const callLabel = calls.length === 0 ? "complete" : `${calls.length} MCP call${calls.length === 1 ? "" : "s"}`;
 		const resultLabel = failed ? `✗ ${callLabel}` : `✓ ${callLabel}`;
 		return [...body, frameBottom(theme, status, resultLabel, width)].join("\n");
+	});
+}
+
+function renderProxyResult(
+	result: ScriptResult,
+	options: { expanded: boolean; isPartial: boolean },
+	theme: Theme,
+	context: RenderContext,
+): Component {
+	const failed = context.isError === true || asString(asRecord(result.details)?.error) !== undefined;
+	const status: FrameStatus = failed ? "error" : options.isPartial ? "pending" : "success";
+	const outputLimit = options.expanded ? MAX_EXPANDED_OUTPUT_LINES : MAX_COLLAPSED_OUTPUT_LINES;
+
+	return new DynamicText((width) => {
+		if (options.isPartial) {
+			return [
+				frameBodyLine(theme, status, theme.fg("warning", "Running MCP tool…"), width),
+				frameBottom(theme, status, "running", width),
+			].join("\n");
+		}
+
+		const output = outputLines(result, theme);
+		const body = [
+			frameBodyLine(theme, status, outputDivider(theme, Math.max(1, width - 2)), width),
+			...output.slice(0, outputLimit).map((line) => frameBodyLine(theme, status, line, width)),
+		];
+		if (output.length > outputLimit) {
+			body.push(frameBodyLine(theme, status, theme.fg("muted", `… ${output.length - outputLimit} more output lines · Ctrl+O to expand`), width));
+		}
+		return [...body, frameBottom(theme, status, failed ? "✗ failed" : "✓ complete", width)].join("\n");
 	});
 }
 
@@ -332,6 +464,8 @@ function installPatch(): void {
 		// stacking another prototype patch.
 		existing.callRenderer = renderCall;
 		existing.resultRenderer = renderResult;
+		existing.proxyCallRenderer = renderProxyCall;
+		existing.proxyResultRenderer = renderProxyResult;
 		return;
 	}
 
@@ -353,19 +487,23 @@ function installPatch(): void {
 		originalRenderShell: originalRenderShell as (...args: unknown[]) => unknown,
 		callRenderer: renderCall,
 		resultRenderer: renderResult,
+		proxyCallRenderer: renderProxyCall,
+		proxyResultRenderer: renderProxyResult,
 	};
 	Object.defineProperty(prototype, PATCH, { value: state, configurable: false });
 
 	prototype.getRenderShell = function (this: InternalToolExecution): unknown {
-		if (this.toolName === MCP_SCRIPT) return "self";
+		if (this.toolName === MCP_SCRIPT || this.toolName === MCP_PROXY) return "self";
 		return state.originalRenderShell.call(this);
 	};
 	prototype.getCallRenderer = function (this: InternalToolExecution): unknown {
 		if (this.toolName === MCP_SCRIPT) return state.callRenderer;
+		if (this.toolName === MCP_PROXY) return state.proxyCallRenderer;
 		return state.originalCallRenderer.call(this);
 	};
 	prototype.getResultRenderer = function (this: InternalToolExecution): unknown {
 		if (this.toolName === MCP_SCRIPT) return state.resultRenderer;
+		if (this.toolName === MCP_PROXY) return state.proxyResultRenderer;
 		return state.originalResultRenderer.call(this);
 	};
 }
