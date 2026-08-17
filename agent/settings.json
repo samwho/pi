@@ -4,7 +4,7 @@
   "quietStartup": true,
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-5.6-terra",
-  "defaultThinkingLevel": "high",
+  "defaultThinkingLevel": "medium",
   "tuiMode": "fullscreen",
   "fullscreenScrollbar": "hidden",
   "defaultProjectTrust": "ask",

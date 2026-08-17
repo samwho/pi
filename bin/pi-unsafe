@@ -17,7 +17,13 @@ export FACELIFT_MAX_PREVIEW_LINES=10
 export LLAMA_BASE_URL="${LLAMA_BASE_URL:-http://127.0.0.1:8080}"
 export PI_OFFLINE=1
 
-# pi-update declares Pi as an npm-backed mise tool. Run from HOME so a
-# project's tool configuration cannot select a different Pi installation.
+# pi-update declares Pi as an npm-backed mise tool. Resolve that tool from HOME
+# so a project's tool configuration cannot select a different Pi installation,
+# while preserving the directory from which this launcher was invoked for Pi.
+launch_dir="$(pwd -P)"
 # pi-web-search also registers Gemini-only url_context; expose only web_search.
-exec mise exec -q -C "$HOME" -- pi "$@" --exclude-tools url_context
+exec mise exec -q -C "$HOME" -- bash -c '
+  cd -- "$1"
+  shift
+  exec pi "$@"
+' bash "$launch_dir" "$@" --exclude-tools url_context
