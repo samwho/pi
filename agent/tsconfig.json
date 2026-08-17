@@ -1,0 +1,54 @@
+{
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": true,
+    "paths": {
+      "@earendil-works/pi-coding-agent": [
+        "../../.local/share/mise/installs/node/latest/lib/node_modules/@earendil-works/pi-coding-agent"
+      ],
+      "@earendil-works/pi-ai": [
+        "../../.local/share/mise/installs/node/latest/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai"
+      ],
+      "@earendil-works/pi-ai/*": [
+        "../../.local/share/mise/installs/node/latest/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai/*"
+      ],
+      "@earendil-works/pi-agent-core": [
+        "../../.local/share/mise/installs/node/latest/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-agent-core"
+      ],
+      "@earendil-works/pi-client": [
+        "../../.local/share/mise/installs/node/latest/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-client"
+      ],
+      "@earendil-works/pi-protocol": [
+        "../../.local/share/mise/installs/node/latest/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-protocol"
+      ],
+      "@earendil-works/pi-telemetry": [
+        "../../.local/share/mise/installs/node/latest/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-telemetry"
+      ],
+      "@earendil-works/pi-tui": [
+        "../../.local/share/mise/installs/node/latest/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-tui"
+      ],
+      "typebox": [
+        "../../.local/share/mise/installs/node/latest/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/typebox"
+      ],
+      "typebox/*": [
+        "../../.local/share/mise/installs/node/latest/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/typebox/*"
+      ],
+      "@sinclair/typebox": [
+        "../../.local/share/mise/installs/node/latest/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/typebox"
+      ],
+      "@sinclair/typebox/*": [
+        "../../.local/share/mise/installs/node/latest/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/typebox/*"
+      ]
+    },
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "ES2022",
+    "typeRoots": [
+      "../../.local/share/mise/installs/node/latest/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/@types"
+    ],
+    "types": ["node"]
+  },
+  "include": ["extensions/**/*.ts"]
+}

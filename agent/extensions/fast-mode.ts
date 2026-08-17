@@ -211,10 +211,11 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.on("before_provider_request", (event, ctx) => {
-    if (!enabled || !supportedModel(ctx.model) || !event.payload || typeof event.payload !== "object") return;
+    const model = ctx.model;
+    if (!enabled || !model || !supportedModel(model) || !event.payload || typeof event.payload !== "object") return;
 
     const payload = event.payload as Record<string, unknown>;
-    if (payload.model !== ctx.model.id) return;
+    if (payload.model !== model.id) return;
     return { ...payload, service_tier: FAST_SERVICE_TIER };
   });
 

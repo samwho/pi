@@ -37,7 +37,7 @@ cleanup() {
     orb stop "$machine" >/dev/null 2>&1 || true
   fi
   if [[ -n "$launch_dir" ]]; then
-    rm -f "$launch_dir/host-ips"
+    rm -f "$launch_dir/host-ips" "$launch_dir/llama-base-url"
   fi
   if (( allocation_lock_held )); then
     rm -f "$allocation_lock"
@@ -117,6 +117,11 @@ if [[ -z "$host_ips" ]]; then
   exit 1
 fi
 printf '%s\n' "$host_ips" >"$launch_dir/host-ips"
+host_ip="${host_ips%%$'\n'*}"
+llama_base_url="${PI_VM_LLAMA_BASE_URL:-http://${host_ip}:8080}"
+# The guest rewrites the copied llama.cpp credential to this per-launch URL;
+# stored host credentials otherwise take precedence over LLAMA_BASE_URL.
+printf '%s\n' "$llama_base_url" >"$launch_dir/llama-base-url"
 
 if ! orb info "$machine" >/dev/null 2>&1; then
   # The VM is persistent per project/profile. Its sessions, dependency tree,
@@ -135,6 +140,40 @@ orb config set "machine.$machine.mounts" \
   "$project_dir:/workspace,$host_config:/mnt/pi-host,$launch_dir:/mnt/pi-launch"
 stop_on_exit=1
 orb start "$machine" >/dev/null
+
+# Wait until the root-owned preparation service has established the runtime
+# mounts and firewall. The VM-local auth snapshot may come from an older
+# persistent clone, so refresh its llama.cpp URL here as well as in the current
+# template; otherwise a stored host-side 127.0.0.1 URL wins over LLAMA_BASE_URL.
+runtime_ready=0
+for _ in {1..300}; do
+  if orb -m "$machine" -u root test -e /run/pi-sandbox-ready >/dev/null 2>&1; then
+    runtime_ready=1
+    break
+  fi
+  sleep 0.1
+done
+if (( ! runtime_ready )); then
+  echo "Timed out waiting for sandbox runtime preparation in $machine." >&2
+  exit 1
+fi
+orb -m "$machine" -u root env "LLAMA_BASE_URL=$llama_base_url" bash -s <<'EOF'
+set -euo pipefail
+auth=/home/pi/.pi/agent/auth.json
+if [[ -s "$auth" ]] && jq -e 'has("llama.cpp")' "$auth" >/dev/null; then
+  rewritten_auth="$(mktemp "${auth}.XXXXXX")"
+  jq --arg base_url "$LLAMA_BASE_URL" '
+    if .["llama.cpp"]? then
+      .["llama.cpp"].env = ((.["llama.cpp"].env // {}) + {"LLAMA_BASE_URL": $base_url})
+    else
+      .
+    end
+  ' "$auth" >"$rewritten_auth"
+  install -o pi -g pi -m 0600 "$rewritten_auth" "$auth"
+  rm -f "$rewritten_auth"
+fi
+EOF
+
 rm -f "$allocation_lock"
 allocation_lock_held=0
 
@@ -147,10 +186,21 @@ sandbox_term="${TERM:-xterm-256color}"
 if (( $# == 0 )); then
   set -- -c
 fi
+# pi-web-search also registers Gemini-only url_context; expose only web_search.
+set -- "$@" --exclude-tools url_context
+
+guest_env=(
+  "TERM=$sandbox_term"
+  "COLORTERM=${COLORTERM:-}"
+  "TERM_PROGRAM=${TERM_PROGRAM:-}"
+  "LLAMA_BASE_URL=$llama_base_url"
+  "PI_OFFLINE=1"
+  "PI_SKIP_VERSION_CHECK=1"
+)
+if [[ -n "${LLAMA_API_KEY:-}" ]]; then
+  guest_env+=("LLAMA_API_KEY=$LLAMA_API_KEY")
+fi
 
 orb -m "$machine" -u pi \
-  env "TERM=$sandbox_term" \
-      "COLORTERM=${COLORTERM:-}" \
-      "TERM_PROGRAM=${TERM_PROGRAM:-}" \
-      PI_SKIP_VERSION_CHECK=1 \
+  env "${guest_env[@]}" \
   bash -c 'cd /workspace && exec /usr/local/bin/pi-guest "$@"' pi "$@"

@@ -1,0 +1,65 @@
+{
+  "skill_name": "talon-voice",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Add a voice command that presses Ctrl+Shift+P only in my editor, and keep it separate from the Community checkout.",
+      "expected_output": "The agent inspects the fileset, creates a narrowly scoped .talon command in a personal fileset, and explains how to reload and test it.",
+      "assertions": [
+        "The solution uses a .talon file for the spoken command",
+        "The command body sends the actual key(ctrl-shift-p), or a confirmed platform equivalent",
+        "The command has a concrete observed application or title matcher, not an undeclared placeholder app name",
+        "The solution places the change outside the Community checkout",
+        "The response includes Talon reload/log checks plus sim and mimic instructions"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "I need a reusable Talon command that parses a direction and performs different Python behavior for north, south, east, and west.",
+      "expected_output": "The agent separates .talon grammar from Python declarations, uses a capture and action, and includes namespaced, typed, documented code with distinct cardinal-direction behavior.",
+      "assertions": [
+        "A Python Module declares the capture and action",
+        "The .talon rule uses a user.<capture> rule and passes the captured value to a user.<action>(direction) call",
+        "The action declaration has a docstring and type annotations",
+        "The Python implementation has genuinely distinct behavior for north, south, east, and west",
+        "The response distinguishes this from arbitrary Python in a .talon body"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "The Community command 'touch' does something I dislike. Can I copy it with an app context and remove one action?",
+      "expected_output": "The agent inspects the exact current Community rule and preserved checkout, warns about exact spoken-form matching and unstable precedence, notes that touch may directly call several actions, and recommends a new phrase, action override only when applicable, or isolated vendoring before showing a phrase override.",
+      "assertions": [
+        "The answer requires inspecting the exact current Community 'touch' rule and preserving the Community checkout",
+        "The answer warns that a near-match is not a reliable override and compares the effective grammar details",
+        "The answer notes that 'touch' may directly call several actions, so an action override applies only if the behavior is delegated through an overrideable action",
+        "At least one safer alternative is recommended, such as a new phrase or isolated vendoring"
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Talon stopped responding to my commands after I edited a file. Please troubleshoot it.",
+      "expected_output": "The agent checks process, microphone, speech engine, awake/mode state, fileset and reload logs, context, and then gives conditional REPL introspection without claiming live results.",
+      "assertions": [
+        "The troubleshooting sequence checks that Talon is running and checks the microphone",
+        "The answer checks the speech engine and awake/mode state",
+        "The answer checks the loaded fileset, reload status, and Talon log for parse/import errors",
+        "The answer checks application/title context and relevant tags, language, or mode",
+        "REPL commands are conditional on a running Talon instance and the answer does not claim live results without one"
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "How should I add voice support for a new programming language to Talon Community?",
+      "expected_output": "The agent follows the lang/<language> and lang/tags architecture, registers the language, activates only implemented tag contracts, tests language selection and filename detection, and adds Python only when declarations are needed.",
+      "assertions": [
+        "The answer mentions registering the language in core/modes/code_languages.py",
+        "The answer mentions a language-specific .talon file and explains that a .py file is only needed for language-specific actions, captures, lists, or settings",
+        "The answer explains shared user.code_* tag contracts and says to activate only supported contracts",
+        "The answer includes the exact current force {user.language_mode} and clear language mode commands, with version/fileset qualification",
+        "The answer includes extension or file-name detection testing and language activation validation",
+        "The answer does not assume optional editor integrations are installed"
+      ]
+    }
+  ]
+}

@@ -1,22 +1,14 @@
 {
   "mcpServers": {
-    "kagi": {
-      "command": "uvx",
-      "args": ["kagimcp"],
-      "env": {
-        "KAGI_API_KEY": "$env:KAGI_API_KEY"
-      }
-    },
     "chrome-devtools": {
       "command": "mise",
       "args": [
         "exec",
         "-q",
         "node@latest",
+        "npm:chrome-devtools-mcp@latest",
         "--",
-        "npx",
-        "--yes",
-        "chrome-devtools-mcp@latest",
+        "chrome-devtools-mcp",
         "--headless",
         "--isolated",
         "--executablePath=/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",

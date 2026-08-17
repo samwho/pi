@@ -22,6 +22,112 @@ disk_bytes() {
   esac
 }
 
+pi_dir="${PI_CONFIG_DIR:-$HOME/.pi}"
+host_npm="$pi_dir/agent/npm"
+host_cloud_config="$HOME/.config/cloud/config.json"
+
+# Copy the host's generic agent-skill directory into the persistent template.
+# Skills are installed and updated by host tools such as `cloud`; VM
+# provisioning only transfers the host-managed directory.
+copy_host_agents_to_template() {
+  local source="$HOME/.agents"
+  local destination="/home/pi/.agents"
+
+  if [[ ! -d "$source" ]]; then
+    echo "Host ~/.agents not found; skipping guest agent-skill copy."
+    return 0
+  fi
+
+  echo "Copying host ~/.agents into $template..."
+  orb -m "$template" -u root rm -rf "$destination"
+  orb -m "$template" -u root mkdir -p "$destination"
+  COPYFILE_DISABLE=1 tar --format=ustar -C "$source" -cf - . |
+    orb -m "$template" -u root tar -C "$destination" -xf -
+  orb -m "$template" -u root chown -R pi:pi "$destination"
+}
+
+# Rebuild the extension dependency tree inside the Linux template. The
+# host's node_modules is never copied because it contains binaries for the host
+# platform. Keep this here, rather than in the pi launcher, so extension
+# updates are explicit and do not add work to every Pi startup.
+update_template_extension_dependencies() {
+  local machine="$1"
+  local manifest
+
+  orb -m "$machine" -u root mkdir -p /home/pi/.pi/agent/npm || return 1
+  orb -m "$machine" -u root chown pi:pi /home/pi/.pi/agent/npm || return 1
+  cat "$repo_root/vm/pi-agent-dependencies.sh" |
+    orb -m "$machine" -u root tee /usr/local/bin/pi-agent-dependencies >/dev/null || return 1
+  orb -m "$machine" -u root chmod 0755 /usr/local/bin/pi-agent-dependencies || return 1
+
+  for manifest in package.json package-lock.json; do
+    if [[ -f "$host_npm/$manifest" ]]; then
+      cat "$host_npm/$manifest" |
+        orb -m "$machine" -u root tee "/home/pi/.pi/agent/npm/$manifest" >/dev/null || return 1
+      orb -m "$machine" -u root chown pi:pi "/home/pi/.pi/agent/npm/$manifest" || return 1
+      orb -m "$machine" -u root chmod 0644 "/home/pi/.pi/agent/npm/$manifest" || return 1
+    else
+      orb -m "$machine" -u root rm -f "/home/pi/.pi/agent/npm/$manifest" || return 1
+    fi
+  done
+
+  orb -m "$machine" -u pi \
+    env \
+    HOME=/home/pi \
+    PATH=/home/pi/.local/share/mise/installs/node/latest/bin:/home/pi/.local/bin:/usr/bin:/bin \
+    /usr/local/bin/pi-agent-dependencies
+}
+
+# These host tools support the Pi launcher and its globally loaded extensions.
+# Keep them declarative in mise rather than relying on Homebrew or Node's global
+# package prefix. Betterleaks uses Aqua because it is not a core mise backend.
+echo "Ensuring host Pi tools are installed through mise..."
+mise use --global \
+  node@latest \
+  uv@latest \
+  aqua:betterleaks/betterleaks@latest \
+  npm:chrome-devtools-mcp@latest \
+  npm:@earendil-works/pi-coding-agent@latest
+
+# Update extensions in the host installation, never through the VM launcher
+# at ~/.pi/agent/bin/pi. The refreshed host npm manifests are copied into the
+# template below, where their Linux-native optional dependencies are rebuilt.
+host_node_root="$(mise where -C "$HOME" node@latest 2>/dev/null || true)"
+host_pi_root="$(mise where -C "$HOME" npm:@earendil-works/pi-coding-agent 2>/dev/null || true)"
+host_pi="$host_pi_root/node_modules/.bin/pi"
+if [[ ! -x "$host_pi" ]]; then
+  echo "Could not find the host Pi CLI installed through mise." >&2
+  exit 1
+fi
+echo "Updating host Pi extensions..."
+mise exec -q -C "$HOME" -- "$host_pi" update --extensions
+
+# @pi-plugins/usage pins Effect 4 beta dependencies, but npm can select an
+# incompatible release-candidate platform peer. Keep the extension's runtime
+# tree resolvable on both macOS and Linux before copying its lockfile to VMs.
+if [[ -f "$host_npm/package.json" ]] && \
+  "$host_node_root/bin/node" -e \
+    'process.exit(require(process.argv[1]).dependencies?.["@pi-plugins/usage"] ? 0 : 1)' \
+    "$host_npm/package.json"; then
+  echo "Reconciling @pi-plugins/usage runtime dependencies..."
+  "$host_node_root/bin/npm" pkg set --prefix "$host_npm" \
+    'overrides.@effect/platform-node-shared=4.0.0-beta.103' \
+    'dependencies.effect=4.0.0-beta.103' \
+    'dependencies.ioredis=^5.7.0'
+  "$host_node_root/bin/npm" install --prefix "$host_npm" \
+    --package-lock-only --legacy-peer-deps --ignore-scripts --no-audit --no-fund
+  "$host_node_root/bin/npm" ci --prefix "$host_npm" \
+    --include=optional --legacy-peer-deps --ignore-scripts --no-audit --no-fund
+fi
+
+# Pi used to be installed directly into mise's Node prefix. Remove that legacy
+# copy only after the mise-managed replacement is available, so the Node prefix
+# no longer shadows mise's managed Pi executable.
+if [[ -x "$host_node_root/bin/npm" && -x "$host_node_root/bin/pi" ]]; then
+  echo "Removing legacy Pi installation from mise's Node prefix..."
+  "$host_node_root/bin/npm" uninstall --global --ignore-scripts @earendil-works/pi-coding-agent
+fi
+
 if ! orb info "$template" >/dev/null 2>&1; then
   echo "Creating persistent isolated Arch ARM64 template $template..."
   orb create \
@@ -60,6 +166,20 @@ else
   orb -m "$template" -u root rm -f /home/pi/.pi/.env
 fi
 
+# Copy the host Laravel Cloud CLI credentials into the persistent template when
+# present. This is intentionally a pragmatic credential projection; the
+# template copy is inherited by newly cloned project VMs.
+if [[ -f "$host_cloud_config" ]]; then
+  echo "Copying host Laravel Cloud CLI config into $template..."
+  orb -m "$template" -u root mkdir -p /home/pi/.config/cloud
+  orb -m "$template" -u root chown pi:pi /home/pi/.config/cloud
+  orb -m "$template" -u root chmod 0700 /home/pi/.config/cloud
+  cat "$host_cloud_config" |
+    orb -m "$template" -u root tee /home/pi/.config/cloud/config.json >/dev/null
+  orb -m "$template" -u root chown pi:pi /home/pi/.config/cloud/config.json
+  orb -m "$template" -u root chmod 0600 /home/pi/.config/cloud/config.json
+fi
+
 # PyInfra connects through OrbStack's built-in localhost-only SSH server. uv
 # uses the repository lockfile and environment; guest-side caches remain in the
 # persistent template.
@@ -69,18 +189,41 @@ PI_VM_TEMPLATE="$template" \
     --chdir "$repo_root/vm/pyinfra" \
     inventory.py deploy.py
 
+# Agent skills are host-managed; copy the complete host directory into the
+# stopped template after provisioning so newly cloned guests load it from
+# ~/.agents.
+copy_host_agents_to_template
+
+# Native extension dependencies belong to the update path, not the Pi startup
+# path. The template is updated first so future project VM clones inherit the
+# dependency tree.
+echo "Updating template-native Pi extension dependencies..."
+update_template_extension_dependencies "$template"
+
 # Validate the persistent base without requiring runtime host mounts. The
 # preparation service intentionally skips itself until a disposable clone has
 # /mnt/pi-launch mounted.
 orb -m "$template" -u pi bash -lc '
   set -euo pipefail
+  export PATH="/home/pi/.local/share/mise/installs/uv/latest/bin:/home/pi/.local/share/mise/installs/node/latest/bin:/home/pi/.local/bin:/home/pi/.local/share/mise/shims:$PATH"
   test "$(uname -m)" = aarch64
   ! command -v sudo >/dev/null
   command -v chromium >/dev/null
   command -v firefox >/dev/null
   command -v gh >/dev/null
-  export PATH="/home/pi/.local/share/mise/installs/node/latest/bin:/home/pi/.local/bin:/home/pi/.local/share/mise/shims:$PATH"
+  command -v php >/dev/null
+  command -v composer >/dev/null
+  command -v cloud >/dev/null
+  command -v betterleaks >/dev/null
+  php --version >/dev/null
+  composer --version >/dev/null
+  cloud --version >/dev/null
+  betterleaks --version >/dev/null
+  for extension in bcmath ctype curl dom exif fileinfo gd iconv intl mbstring mysqli openssl PDO pdo_mysql pdo_pgsql pdo_sqlite redis soap sqlite3 tokenizer xml xsl zip; do
+    php -m | grep -Fx "$extension" >/dev/null
+  done
   export NODE_NO_WARNINGS=1
+  /usr/local/bin/pi-prefetch-mcp
   /home/pi/.local/share/mise/installs/node/latest/bin/chrome-devtools-mcp --version >/dev/null
   /home/pi/.local/share/mise/installs/node/latest/bin/pi --version
   export DOCKER_HOST="unix:///run/user/$(id -u)/docker.sock"
