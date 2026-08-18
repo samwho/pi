@@ -20,6 +20,9 @@ if [[ -f /home/pi/.pi/.env ]]; then
   set +a
 fi
 
+# RTK must not send usage telemetry from sandboxed Pi sessions.
+export RTK_TELEMETRY_DISABLED=1
+
 export FACELIFT_THEME=gruvbox-dark-hard
 export FACELIFT_MAX_PREVIEW_LINES=10
 
