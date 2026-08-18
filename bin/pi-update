@@ -86,6 +86,7 @@ mise use --global \
   node@latest \
   uv@latest \
   aqua:betterleaks/betterleaks@latest \
+  aqua:rtk-ai/rtk@latest \
   npm:chrome-devtools-mcp@latest \
   npm:@earendil-works/pi-coding-agent@latest
 
