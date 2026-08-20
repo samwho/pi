@@ -6,6 +6,7 @@ agent/auth.json
 agent/trust.json
 
 agent/mcp-cache.json
+agent/mcp-onboarding.json
 .env
 .env.*
 !.env.example
