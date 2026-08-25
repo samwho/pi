@@ -51,8 +51,10 @@ PI_VM_PROFILE=work ~/.pi/bin/pi
 ```
 
 `pi-update` updates the base template, host Pi installation, extensions, and
-Linux tooling. Existing project machines are not changed; run `pi-delete` from
-a project when you want fresh clones of the updated template.
+Linux tooling. It also installs and upgrades every `latest` tool in the shared
+[`mise.toml`](mise.toml) on both the host and template. Existing project
+machines are not changed; run `pi-delete` from a project when you want fresh
+clones of the updated template.
 
 To bypass the sandbox and run Pi directly on macOS:
 
@@ -153,6 +155,7 @@ Key files:
 | `bin/pi-update` | Create and provision the template. |
 | `bin/pi-diff` | Preview provisioning changes. |
 | `bin/pi-delete` | Delete the current project/profile's stopped machines. |
+| `mise.toml` | Shared baseline Mise tools for the host and guest template. |
 | `vm/pyinfra/` | Packages, tools, users, files, and services. |
 | `vm/prepare-runtime.sh` | Mount policy and runtime preparation. |
 | `vm/network-lockdown.sh` | Egress firewall. |

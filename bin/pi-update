@@ -78,23 +78,21 @@ update_template_extension_dependencies() {
     /usr/local/bin/pi-agent-dependencies
 }
 
-# These host tools support the Pi launcher and its globally loaded extensions.
-# Keep them declarative in mise rather than relying on Homebrew or Node's global
-# package prefix. Betterleaks uses Aqua because it is not a core mise backend.
-echo "Ensuring host Pi tools are installed through mise..."
-mise use --global \
-  node@latest \
-  uv@latest \
-  aqua:betterleaks/betterleaks@latest \
-  aqua:rtk-ai/rtk@latest \
-  npm:chrome-devtools-mcp@latest \
-  npm:@earendil-works/pi-coding-agent@latest
+# The repository's shared mise.toml is the sole baseline-tool declaration for
+# the macOS host and Linux guest. Make it the host global config as well, so Pi
+# and its MCP children work when launched outside this checkout.
+echo "Installing and upgrading shared host mise tools..."
+mkdir -p "$HOME/.config/mise"
+ln -sfn "$repo_root/mise.toml" "$HOME/.config/mise/config.toml"
+mise trust "$repo_root/mise.toml"
+mise install -C "$repo_root"
+mise upgrade -y -C "$repo_root"
 
 # Update extensions in the host installation, never through the VM launcher
 # at ~/.pi/agent/bin/pi. The refreshed host npm manifests are copied into the
 # template below, where their Linux-native optional dependencies are rebuilt.
-host_node_root="$(mise where -C "$HOME" node@latest 2>/dev/null || true)"
-host_pi_root="$(mise where -C "$HOME" npm:@earendil-works/pi-coding-agent 2>/dev/null || true)"
+host_node_root="$(mise where -C "$repo_root" node@latest 2>/dev/null || true)"
+host_pi_root="$(mise where -C "$repo_root" npm:@earendil-works/pi-coding-agent 2>/dev/null || true)"
 host_pi="$host_pi_root/node_modules/.bin/pi"
 if [[ ! -x "$host_pi" ]]; then
   echo "Could not find the host Pi CLI installed through mise." >&2

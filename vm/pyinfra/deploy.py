@@ -6,11 +6,9 @@ from pyinfra.facts.server import Users
 from pyinfra.operations import files, pacman, server, systemd
 from pyinfra.operations.util import any_changed
 
-from operations import mise_npm_packages, mise_tools, user_without_groups
+from operations import mise_install_and_upgrade, user_without_groups
 
 VM_DIR = Path(__file__).resolve().parent.parent
-MISE_VERSION = "2026.8.4"
-MISE_SHA256 = "9cb1227dd27a11c0895374b8ea4e07fb9ff73c32451267d07f2ae84db07bda0e"
 
 packages = [
     "autoconf",
@@ -320,38 +318,27 @@ systemd.service(
     _if=any_changed(docker_unit),
 )
 
-# Mise has no built-in pyinfra operation. Install its pinned, checksummed binary,
-# then use local fact-driven operations to converge tools and npm packages.
-files.download(
-    name="Install mise",
-    src=f"https://github.com/jdx/mise/releases/download/v{MISE_VERSION}/mise-v{MISE_VERSION}-linux-arm64",
-    dest="/home/pi/.local/bin/mise",
+# The stable latest-download URL intentionally refreshes Mise on every template
+# update. The shared config below then installs and upgrades its declared tools.
+server.shell(
+    name="Download latest mise",
+    commands=[
+        "curl --fail --location --retry 3 --output /home/pi/.local/bin/mise.new "
+        "https://mise.jdx.dev/mise-latest-linux-arm64",
+        "chown pi:pi /home/pi/.local/bin/mise.new",
+        "chmod 0755 /home/pi/.local/bin/mise.new",
+        "mv /home/pi/.local/bin/mise.new /home/pi/.local/bin/mise",
+    ],
+)
+files.put(
+    name="Install shared mise tool configuration",
+    src=str(VM_DIR.parent / "mise.toml"),
+    dest="/home/pi/.config/mise/config.toml",
     user="pi",
     group="pi",
-    mode="0755",
-    sha256sum=MISE_SHA256,
+    mode="0600",
 )
-mise_tools(
-    name="Install or update mise-managed tools",
-    tools=[
-        "node@latest",
-        "bun@latest",
-        "rust@latest",
-        "uv@latest",
-        "betterleaks@latest",
-        "rtk@latest",
-        "python@latest",
-        "npm:pnpm@latest",
-        "npm:@biomejs/biome@latest",
-    ],
-)
-mise_npm_packages(
-    name="Install or update Pi and Chrome DevTools MCP",
-    packages=[
-        "@earendil-works/pi-coding-agent@latest",
-        "chrome-devtools-mcp@latest",
-    ],
-)
+mise_install_and_upgrade(name="Install and upgrade shared mise tools")
 server.shell(
     name="Remove Firefox DevTools MCP",
     commands=[

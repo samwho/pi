@@ -57,4 +57,6 @@ eval "$('/home/pi/.local/bin/mise' activate bash)"
 export pnpm_config_store_dir=/home/pi/.cache/pnpm/store
 /usr/local/bin/pi-project-dependencies
 
-exec /home/pi/.local/share/mise/installs/node/latest/bin/pi "$@"
+# Resolve Pi from the shared global config, not a Node-global package path.
+# Keep /workspace as the process directory so the agent sees the mounted project.
+exec "$(/home/pi/.local/bin/mise -C /home/pi which pi)" "$@"
