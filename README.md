@@ -39,8 +39,9 @@ Each machine gets:
 ~/.pi/bin/pi-delete
 ```
 
-A bare `pi` resumes the machine's latest session. Arguments are passed to Pi,
-so use `pi -c "prompt"` to resume with an initial prompt.
+A bare `pi` resumes the machine's latest session; a bare `pi-unsafe` does the
+same for the host. Arguments are passed to Pi, so use `pi -c "prompt"` to
+resume with an initial prompt.
 
 Machines persist after Pi exits. Concurrent launches use separate numbered
 machines, while later launches reuse the lowest available one. Set

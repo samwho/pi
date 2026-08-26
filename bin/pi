@@ -187,7 +187,14 @@ if (( $# == 0 )); then
   set -- -c
 fi
 # pi-web-search also registers Gemini-only url_context; expose only web_search.
-set -- "$@" --exclude-tools url_context
+# Package commands use their own parser and cannot accept agent tool options.
+case "${1-}" in
+  install|remove|uninstall|update|list|config|auth)
+    ;;
+  *)
+    set -- --exclude-tools url_context "$@"
+    ;;
+esac
 
 guest_env=(
   "TERM=$sandbox_term"
