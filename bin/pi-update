@@ -223,8 +223,8 @@ orb -m "$template" -u pi bash -lc '
   done
   export NODE_NO_WARNINGS=1
   /usr/local/bin/pi-prefetch-mcp
-  /home/pi/.local/share/mise/installs/node/latest/bin/chrome-devtools-mcp --version >/dev/null
-  /home/pi/.local/share/mise/installs/node/latest/bin/pi --version
+  /home/pi/.local/bin/mise exec -q node@latest -- chrome-devtools-mcp --version >/dev/null
+  /home/pi/.local/bin/mise exec -q node@latest -- pi --version
   export DOCKER_HOST="unix:///run/user/$(id -u)/docker.sock"
   for _ in $(seq 1 120); do
     docker info >/dev/null 2>&1 && break
