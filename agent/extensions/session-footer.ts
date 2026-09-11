@@ -1,4 +1,5 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
+import { homedir } from "node:os";
 import { FAST_COST_MULTIPLIER } from "./fast-mode.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
@@ -59,6 +60,23 @@ function effectiveRate(rate: number | undefined, fastEnabled: boolean): number |
   return rate * FAST_COST_MULTIPLIER;
 }
 
+function displayCwd(
+  cwd: string,
+  shortened: (text: string) => string,
+  normal: (text: string) => string,
+): string {
+  const home = homedir();
+  const display = cwd === home ? "~" : cwd.startsWith(`${home}/`) ? `~${cwd.slice(home.length)}` : cwd;
+  const prefix = display.startsWith("~/") ? "~/" : display.startsWith("/") ? "/" : "";
+  const segments = display.slice(prefix.length).split("/").filter(Boolean);
+
+  if (segments.length <= 2) return normal(display);
+
+  return normal(prefix) + segments
+    .map((segment, index) => index < segments.length - 2 ? shortened(segment.slice(0, 2)) : normal(segment))
+    .join(normal("/"));
+}
+
 export default function (pi: ExtensionAPI) {
   let requestFooterRender: (() => void) | undefined;
 
@@ -76,7 +94,12 @@ export default function (pi: ExtensionAPI) {
           const contextText = contextStatusColor
             ? theme.fg(contextStatusColor, contextLabel)
             : theme.fg("dim", contextLabel);
-          const left = `${contextText} ${theme.fg("dim", `$${sessionCost(ctx).toFixed(3)}`)}`;
+          const cwdText = displayCwd(
+            ctx.cwd,
+            (text) => theme.fg("dim", text),
+            (text) => theme.fg("accent", text),
+          );
+          const left = `${cwdText} ${contextText} ${theme.fg("dim", `$${sessionCost(ctx).toFixed(3)}`)}`;
 
           const model = ctx.model;
           const fastEnabled = footerData.getExtensionStatuses().has("pi-gpt-fast-mode");
