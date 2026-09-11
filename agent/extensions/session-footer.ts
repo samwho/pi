@@ -5,6 +5,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 type StatusColor = "success" | "warning" | "error";
+type GitDelta = { additions: number; deletions: number; untracked: number };
 
 // Rates in Pi's model catalogue are USD per million tokens. The highest of
 // input/output is used so an expensive output price is not hidden by cheap input.
@@ -52,6 +53,7 @@ function contextColor(percent: number | null | undefined): StatusColor | undefin
 
 function formatRate(rate: number | undefined): string {
   if (typeof rate !== "number" || !Number.isFinite(rate)) return "?";
+  if (Number.isInteger(rate)) return rate.toFixed(0);
   return rate < 10 ? rate.toFixed(2) : rate.toFixed(0);
 }
 
@@ -77,8 +79,59 @@ function displayCwd(
     .join(normal("/"));
 }
 
+function parseNumstat(output: string): Pick<GitDelta, "additions" | "deletions"> {
+  let additions = 0;
+  let deletions = 0;
+
+  for (const line of output.split("\n")) {
+    const [added, deleted] = line.split("\t", 2);
+    if (added && added !== "-") additions += Number.parseInt(added, 10) || 0;
+    if (deleted && deleted !== "-") deletions += Number.parseInt(deleted, 10) || 0;
+  }
+
+  return { additions, deletions };
+}
+
+function modelLabel(provider: string | undefined, id: string | undefined): string {
+  if (!id) return "no model";
+  return provider?.startsWith("openai") ? id.replace(/^gpt-\d+(?:\.\d+)*-/, "") : id;
+}
+
 export default function (pi: ExtensionAPI) {
   let requestFooterRender: (() => void) | undefined;
+  let gitDelta: GitDelta | null = null;
+  let gitRefreshVersion = 0;
+
+  async function refreshGitDelta(ctx: ExtensionContext): Promise<void> {
+    const version = ++gitRefreshVersion;
+    const status = await pi.exec(
+      "git",
+      ["status", "--porcelain=v1", "--untracked-files=normal"],
+      { cwd: ctx.cwd, timeout: 5000 },
+    );
+
+    if (version !== gitRefreshVersion) return;
+    if (status.code !== 0) {
+      gitDelta = null;
+      requestFooterRender?.();
+      return;
+    }
+
+    const hasHead = (await pi.exec("git", ["rev-parse", "--verify", "HEAD"], {
+      cwd: ctx.cwd,
+      timeout: 5000,
+    })).code === 0;
+    const diffArgs = hasHead ? ["diff", "--numstat", "HEAD"] : ["diff", "--cached", "--numstat"];
+    const diff = await pi.exec("git", diffArgs, { cwd: ctx.cwd, timeout: 5000 });
+
+    if (version !== gitRefreshVersion) return;
+    const delta = diff.code === 0 ? parseNumstat(diff.stdout) : { additions: 0, deletions: 0 };
+    gitDelta = {
+      ...delta,
+      untracked: status.stdout.split("\n").filter((line) => line.startsWith("?? ")).length,
+    };
+    requestFooterRender?.();
+  }
 
   pi.on("session_start", (_event, ctx) => {
     ctx.ui.setFooter((tui, theme, footerData) => {
@@ -99,16 +152,29 @@ export default function (pi: ExtensionAPI) {
             (text) => theme.fg("dim", text),
             (text) => theme.fg("accent", text),
           );
-          const left = `${cwdText} ${contextText} ${theme.fg("dim", `$${sessionCost(ctx).toFixed(3)}`)}`;
+          const deltaText = gitDelta
+            ? [
+                theme.fg(gitDelta.additions ? "success" : "dim", `+${gitDelta.additions}`),
+                theme.fg(gitDelta.deletions ? "error" : "dim", `-${gitDelta.deletions}`),
+                gitDelta.untracked ? theme.fg("warning", `?${gitDelta.untracked}`) : "",
+              ].filter(Boolean).join(" ")
+            : "";
+          const divider = theme.fg("dim", "|");
+          const left = [
+            cwdText,
+            deltaText,
+            contextText,
+            theme.fg("dim", `$${sessionCost(ctx).toFixed(2)}`),
+          ].filter(Boolean).join(` ${divider} `);
 
           const model = ctx.model;
           const fastEnabled = footerData.getExtensionStatuses().has("pi-gpt-fast-mode");
           const inputRate = effectiveRate(model?.cost?.input, fastEnabled);
           const outputRate = effectiveRate(model?.cost?.output, fastEnabled);
-          const modelLabel = model?.id ?? "no model";
+          const displayedModel = modelLabel(model?.provider, model?.id);
           const modelText = theme.fg(
             model ? priceColor(inputRate, outputRate) : "dim",
-            modelLabel,
+            displayedModel,
           );
           const thinkingLevel = model?.reasoning ? ctx.thinkingLevel ?? "off" : "off";
           const thinkingText = theme.fg(thinkingColor(thinkingLevel), thinkingLevel);
@@ -128,6 +194,14 @@ export default function (pi: ExtensionAPI) {
         },
       };
     });
+
+    void refreshGitDelta(ctx);
+  });
+
+  pi.on("tool_execution_end", (event, ctx) => {
+    if (event.toolName === "bash" || event.toolName === "write" || event.toolName === "edit") {
+      void refreshGitDelta(ctx);
+    }
   });
 
   // These changes can happen without a message being added to the branch.

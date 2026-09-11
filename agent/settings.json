@@ -1,5 +1,5 @@
 {
-  "lastChangelogVersion": "0.84.3",
+  "lastChangelogVersion": "0.85.1",
   "theme": "dark",
   "quietStartup": true,
   "defaultProvider": "openai-codex",
@@ -18,7 +18,7 @@
   "steeringMode": "one-at-a-time",
   "packages": [
     "git:github.com/badlogic/pi-skills",
-    "npm:pi-mcp-adapter",
+    "npm:pi-mcp-adapter@2.32.1",
     "npm:@pi-plugins/usage",
     "npm:@wierdbytes/pi-facelift",
     "npm:pi-context-view",
