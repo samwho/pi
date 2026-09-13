@@ -15,6 +15,9 @@ import { isToolCallEventType } from "@earendil-works/pi-coding-agent"
 
 const REWRITE_TIMEOUT_MS = 2_000
 const MIN_SUPPORTED_RTK_MINOR = 23
+const RTK_COMMAND = process.env.HOME
+  ? `${process.env.HOME}/.local/share/mise/installs/aqua-rtk-ai-rtk/latest/rtk`
+  : "rtk"
 
 // Parse "X.Y.Z" semver, return [major, minor, patch] or null.
 function parseSemver(raw: string): [number, number, number] | null {
@@ -29,7 +32,7 @@ async function rewriteCommand(
   cmd: string,
   signal?: AbortSignal
 ): Promise<string | null> {
-  const result = await pi.exec("rtk", ["rewrite", cmd], {
+  const result = await pi.exec(RTK_COMMAND, ["rewrite", cmd], {
     timeout: REWRITE_TIMEOUT_MS,
     signal,
   })
@@ -40,9 +43,9 @@ async function rewriteCommand(
 
 export default async function (pi: ExtensionAPI) {
   // Probe rtk version at load time; disables extension if missing or too old.
-  const ver = await pi.exec("rtk", ["--version"], { timeout: REWRITE_TIMEOUT_MS })
+  const ver = await pi.exec(RTK_COMMAND, ["--version"], { timeout: REWRITE_TIMEOUT_MS })
   if (ver.code !== 0) {
-    console.warn("[rtk] rtk binary not found in PATH — extension disabled")
+    console.warn("[rtk] rtk binary not found — extension disabled")
     return
   }
 

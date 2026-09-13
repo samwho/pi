@@ -25,6 +25,12 @@ export PI_OFFLINE=1
 # Pi installation, while preserving the directory from which this launcher was
 # invoked for Pi.
 launch_dir="$(pwd -P)"
+host_pi="$(mise which -C "$pi_root" pi 2>/dev/null || true)"
+if [[ -z "$host_pi" || ! -x "$host_pi" ]]; then
+  echo "Could not find the host Pi CLI installed through mise." >&2
+  echo "Run $pi_root/bin/pi-update to install or repair it." >&2
+  exit 1
+fi
 
 # A bare launcher invocation resumes the most recent host session. Supplying an
 # argument preserves Pi's normal CLI behavior (use -c explicitly when
@@ -37,14 +43,16 @@ fi
 exec mise exec -q -C "$pi_root" -- bash -c '
   cd -- "$1"
   shift
+  host_pi="$1"
+  shift
   # Package commands use their own parser and cannot accept agent tool options.
   # They do not start an agent, so url_context does not need to be excluded.
   case "${1-}" in
     install|remove|uninstall|update|list|config|auth)
-      exec pi "$@"
+      exec "$host_pi" "$@"
       ;;
     *)
-      exec pi --exclude-tools url_context "$@"
+      exec "$host_pi" --exclude-tools url_context "$@"
       ;;
   esac
-' bash "$launch_dir" "$@"
+' bash "$launch_dir" "$host_pi" "$@"
