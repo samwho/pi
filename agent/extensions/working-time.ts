@@ -33,7 +33,7 @@ export default function (pi: ExtensionAPI): void {
 
   function update(ctx: ExtensionContext): void {
     if (startedAt === undefined || !ctx.hasUI) return;
-    ctx.ui.setWorkingMessage(`Working... ${formatElapsed(Date.now() - startedAt)}`);
+    ctx.ui.setWorkingMessage(formatElapsed(Date.now() - startedAt));
   }
 
   pi.on("before_agent_start", (_event, ctx) => {

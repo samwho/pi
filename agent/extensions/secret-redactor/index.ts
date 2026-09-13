@@ -1,5 +1,24 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import { spawn } from "node:child_process";
+import { stripVTControlCharacters } from "node:util";
+
+const REDACTION_NOTICE_ENTRY = "secret-redaction-notice";
+const WITHHELD_MESSAGE = "[Tool output withheld because secret redaction failed.]";
+const MAX_NOTICE_LINES = 20;
+const MAX_NOTICE_LINE_LENGTH = 500;
+
+type RedactedLine = {
+	line: number;
+	text: string;
+};
+
+type RedactionNotice = {
+	source: string;
+	lines: RedactedLine[];
+	omittedLines: number;
+	detailsRedacted: boolean;
+};
 
 type Finding = {
 	StartLine: number;
@@ -137,7 +156,7 @@ async function redactContent<T extends { type: string; text?: string }>(
 	} catch {
 		// Never reveal output when the redactor itself is unavailable. Do not put
 		// the scan error in the result: it can include the text being scanned.
-		return [{ type: "text", text: "[Tool output withheld because secret redaction failed.]" } as T];
+		return [{ type: "text", text: WITHHELD_MESSAGE } as T];
 	}
 }
 
@@ -160,7 +179,74 @@ async function redactDetails(value: unknown, signal?: AbortSignal): Promise<unkn
 	}
 }
 
+function collectRedactedLines(
+	original: Array<{ type: string; text?: string }>,
+	redacted: Array<{ type: string; text?: string }>,
+): { lines: RedactedLine[]; omittedLines: number } {
+	const lines: RedactedLine[] = [];
+	let omittedLines = 0;
+
+	for (let blockIndex = 0; blockIndex < original.length; blockIndex++) {
+		const before = original[blockIndex];
+		const after = redacted[blockIndex];
+		if (before?.type !== "text" || after?.type !== "text") continue;
+		if (typeof before.text !== "string" || typeof after.text !== "string") continue;
+		if (after.text === WITHHELD_MESSAGE) continue;
+
+		const beforeLines = before.text.split("\n");
+		const afterLines = after.text.split("\n");
+		for (let lineIndex = 0; lineIndex < afterLines.length; lineIndex++) {
+			if (beforeLines[lineIndex] === afterLines[lineIndex]) continue;
+			if (lines.length >= MAX_NOTICE_LINES) {
+				omittedLines++;
+				continue;
+			}
+			const text = stripVTControlCharacters(afterLines[lineIndex] ?? "");
+			lines.push({
+				line: lineIndex + 1,
+				text: text.length > MAX_NOTICE_LINE_LENGTH
+					? `${text.slice(0, MAX_NOTICE_LINE_LENGTH)}…`
+					: text,
+			});
+		}
+	}
+
+	return { lines, omittedLines };
+}
+
+function toolSource(toolName: string, input: unknown): string {
+	if (input && typeof input === "object" && "path" in input) {
+		const path = (input as { path?: unknown }).path;
+		if (typeof path === "string" && path.length > 0) return path;
+	}
+	return `${toolName} output`;
+}
+
+function serialize(value: unknown): string | undefined {
+	try {
+		return JSON.stringify(value);
+	} catch {
+		return undefined;
+	}
+}
+
 export default function (pi: ExtensionAPI): void {
+	pi.registerEntryRenderer(REDACTION_NOTICE_ENTRY, (entry, _options, theme) => {
+		const notice = entry.data as RedactionNotice;
+		const rendered = [theme.fg("error", theme.bold("⚠ Secret redacted"))];
+		rendered.push(theme.fg("error", theme.bold(notice.source)));
+		for (const line of notice.lines) {
+			rendered.push(theme.fg("error", `  ${line.line.toString().padStart(4)} │ ${line.text}`));
+		}
+		if (notice.omittedLines > 0) {
+			rendered.push(theme.fg("error", `  … ${notice.omittedLines} more redacted line(s)`));
+		}
+		if (notice.detailsRedacted) {
+			rendered.push(theme.fg("error", "  Structured tool details were also redacted."));
+		}
+		return new Text(rendered.join("\n"), 0, 0);
+	});
+
 	pi.on("session_start", (_event, ctx) => {
 		ctx.ui.setStatus("secret-redactor", "secret redaction: active");
 	});
@@ -175,14 +261,32 @@ export default function (pi: ExtensionAPI): void {
 		if (event.toolName === "web_search") return;
 
 		try {
+			const originalDetails = serialize(event.details);
 			const [content, details] = await Promise.all([
 				redactContent(event.content, ctx.signal),
 				redactDetails(event.details, ctx.signal),
 			]);
+			const { lines, omittedLines } = collectRedactedLines(event.content, content);
+			const redactedDetails = serialize(details);
+			const detailsRedacted = originalDetails !== undefined
+				&& redactedDetails !== undefined
+				&& originalDetails !== redactedDetails
+				&& redactedDetails !== serialize({ _type: "redactionFailed" });
+
+			if (lines.length > 0 || detailsRedacted) {
+				const source = await redact(toolSource(event.toolName, event.input), ctx.signal);
+				pi.appendEntry(REDACTION_NOTICE_ENTRY, {
+					source,
+					lines,
+					omittedLines,
+					detailsRedacted,
+				} satisfies RedactionNotice);
+			}
+
 			return { content, details };
 		} catch {
 			return {
-				content: [{ type: "text", text: "[Tool output withheld because secret redaction failed.]" }],
+				content: [{ type: "text", text: WITHHELD_MESSAGE }],
 				details: { _type: "redactionFailed" },
 			};
 		}
