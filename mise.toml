@@ -1,22 +1,5 @@
-# Shared baseline for the macOS host and Arch Linux Pi guest.
-# Keep tool requests floating so `bin/pi-update` installs current releases in
-# both environments. Individual projects may still declare their own mise.toml.
-
 [tools]
-bun = "latest"
-node = "latest"
-npm = "latest"
-python = "latest"
-rust = "latest"
-uv = "latest"
-go = "latest"
-biome = "latest"
-oxlint = "latest"
-"npm:pnpm" = "latest"
 "aqua:betterleaks/betterleaks" = "latest"
 "aqua:rtk-ai/rtk" = "latest"
 "npm:chrome-devtools-mcp" = "latest"
 "npm:@earendil-works/pi-coding-agent" = "latest"
-
-[settings]
-idiomatic_version_file_enable_tools = ["python"]

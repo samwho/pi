@@ -14,7 +14,7 @@ agent/mcp-onboarding.json
 *.key
 *.p12
 *.pfx
-# The shared host/guest toolchain is deliberately version-controlled.
+# The shared host toolchain is deliberately version-controlled.
 !mise.toml
 credentials*.json
 secrets*.json

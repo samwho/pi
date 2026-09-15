@@ -2,7 +2,7 @@
 
 ## Agent skills
 
-Manage agent skills on the host, not in `vm/pyinfra/deploy.py`. Install and update skills in the host Pi setup (normally `~/.agents`), then copy the complete directory into guest VMs through the host-managed setup when it exists. Do not duplicate a host skill under `~/.pi/agent/skills`, and do not add skill installation or update commands to VM deployment provisioning.
+Install and update shared agent skills in `~/.agents`. Do not duplicate a host skill under `~/.pi/agent/skills`.
 
 ## Tool installation
 
