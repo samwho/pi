@@ -32,6 +32,8 @@ function normalize(value: string): string {
 	return value
 		.replace(/```[\s\S]*?```/g, " code ")
 		.replace(/`([^`]+)`/g, "$1")
+		.replace(/(\*\*|__)(?=\S)(.+?\S)\1/g, "$2")
+		.replace(/([*_])(?=\S)(.+?\S)\1/g, "$2")
 		.replace(/\s+/g, " ")
 		.replace(/^[#>*_\-\s]+/, "")
 		.trim();
