@@ -6,16 +6,17 @@ function setTerminalTitle(ctx: ExtensionContext): void {
 	if (ctx.mode === "tui") ctx.ui.setTitle(TITLE);
 }
 
-function enforceTerminalTitle(ctx: ExtensionContext): void {
-	setTerminalTitle(ctx);
-	// Pi's session rebind updates its built-in `π - <directory>` title after
-	// session_start handlers complete. Run once more on the next event-loop turn
-	// so our local title is the final write.
-	setImmediate(() => setTerminalTitle(ctx)).unref();
+async function setHerdrTabTitle(pi: ExtensionAPI, title: string): Promise<void> {
+	const tabId = process.env.HERDR_TAB_ID;
+	if (process.env.HERDR_ENV !== "1" || !tabId) return;
+	await pi.exec(process.env.HERDR_BIN_PATH || "herdr", ["tab", "rename", tabId, title]);
 }
 
 export default function (pi: ExtensionAPI): void {
-	pi.on("session_start", (_event, ctx) => enforceTerminalTitle(ctx));
-	// Pi also rewrites the title when a session is renamed.
-	pi.on("session_info_changed", (_event, ctx) => enforceTerminalTitle(ctx));
+	pi.on("session_start", async (_event, ctx) => {
+		setTerminalTitle(ctx);
+		await setHerdrTabTitle(pi, TITLE);
+	});
+	// An empty label hands the tab back to Herdr Auto Title when Pi exits.
+	pi.on("session_shutdown", async () => setHerdrTabTitle(pi, ""));
 }
