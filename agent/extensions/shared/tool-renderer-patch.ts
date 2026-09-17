@@ -32,6 +32,15 @@ type PatchState = {
 
 const PATCH = Symbol.for("pi.local-tool-renderer.patch");
 
+function registeredRendererFor(state: PatchState, toolName: string): RegisteredRenderer | undefined {
+	const exact = state.renderers.get(toolName);
+	if (exact) return exact;
+	for (const [pattern, renderer] of state.renderers) {
+		if (pattern.endsWith("*") && toolName.startsWith(pattern.slice(0, -1))) return renderer;
+	}
+	return undefined;
+}
+
 /**
  * Render externally-owned tools in a custom self-contained frame without
  * replacing their definitions. One dispatcher is shared by every local
@@ -62,37 +71,25 @@ export function registerToolRenderer(toolNames: Iterable<string>, renderer: Regi
 			decorators: new Map(),
 		};
 		Object.defineProperty(prototype, PATCH, { value: state, configurable: false });
-
-		prototype.getRenderShell = function(this: InternalToolExecution): unknown {
-			return state!.renderers.has(String(this.toolName)) ? "self" : state!.originalRenderShell.call(this);
-		};
-		prototype.getCallRenderer = function(this: InternalToolExecution): unknown {
-			const toolName = String(this.toolName);
-			const registered = state!.renderers.get(toolName);
-			return registered
-				? ((args: unknown, theme: Theme, context: ToolRenderContext) => registered.renderCall(toolName, args, theme, context))
-				: state!.originalCallRenderer.call(this);
-		};
-		prototype.getResultRenderer = function(this: InternalToolExecution): unknown {
-			const toolName = String(this.toolName);
-			const registered = state!.renderers.get(toolName);
-			const renderer = registered
-				? ((result: ToolResult, options: { expanded: boolean; isPartial: boolean }, theme: Theme, context: ToolRenderContext) => registered.renderResult(toolName, result, options, theme, context))
-				: state!.originalResultRenderer.call(this);
-			const decorator = state!.decorators.get(toolName);
-			if (!decorator || typeof renderer !== "function") return renderer;
-			return (result: ToolResult, options: { expanded: boolean; isPartial: boolean }, theme: Theme, context: ToolRenderContext) =>
-				(renderer as (...args: unknown[]) => unknown)(decorator(toolName, result, options, theme, context), options, theme, context);
-		};
 	}
 
 	// A process may retain an older patch state across `/reload` while this
-	// helper gains new capabilities. Refresh this dispatcher so decorators
-	// also work without restarting Pi.
+	// helper gains new capabilities. Refresh every dispatcher so wildcard
+	// renderers and decorators also work without restarting Pi.
 	state.decorators ??= new Map();
+	prototype.getRenderShell = function(this: InternalToolExecution): unknown {
+		return registeredRendererFor(state!, String(this.toolName)) ? "self" : state!.originalRenderShell.call(this);
+	};
+	prototype.getCallRenderer = function(this: InternalToolExecution): unknown {
+		const toolName = String(this.toolName);
+		const registered = registeredRendererFor(state!, toolName);
+		return registered
+			? ((args: unknown, theme: Theme, context: ToolRenderContext) => registered.renderCall(toolName, args, theme, context))
+			: state!.originalCallRenderer.call(this);
+	};
 	prototype.getResultRenderer = function(this: InternalToolExecution): unknown {
 		const toolName = String(this.toolName);
-		const registered = state!.renderers.get(toolName);
+		const registered = registeredRendererFor(state!, toolName);
 		const resultRenderer = registered
 			? ((result: ToolResult, options: { expanded: boolean; isPartial: boolean }, theme: Theme, context: ToolRenderContext) => registered.renderResult(toolName, result, options, theme, context))
 			: state!.originalResultRenderer.call(this);

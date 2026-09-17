@@ -21,6 +21,7 @@ import { registerToolRenderer, type ToolRenderContext } from "./shared/tool-rend
 
 const MCP_SCRIPT = "mcpScript";
 const MCP_PROXY = "mcp";
+const MCP_NAMESPACE_PROXY = "mcp__*";
 const MAX_COLLAPSED_CODE_LINES = 4;
 const MAX_EXPANDED_CODE_LINES = 160;
 const MAX_COLLAPSED_TRACE_LINES = 6;
@@ -298,8 +299,15 @@ function renderCall(argsValue: unknown, theme: Theme, context: RenderContext): C
 	});
 }
 
-function renderProxyCall(argsValue: unknown, theme: Theme, context: RenderContext): Component {
-	const args = (asRecord(argsValue) ?? {}) as ProxyArgs;
+function namespaceServer(toolName: string): string | undefined {
+	if (!toolName.startsWith("mcp__")) return undefined;
+	return toolName.slice("mcp__".length).replaceAll("_", "-");
+}
+
+function renderProxyCall(toolName: string, argsValue: unknown, theme: Theme, context: RenderContext): Component {
+	const input = (asRecord(argsValue) ?? {}) as ProxyArgs;
+	const server = namespaceServer(toolName);
+	const args = server && input.server === undefined ? { ...input, server } : input;
 	const status = statusFor(context);
 	const expanded = context.expanded === true;
 	const title = `${theme.fg("toolTitle", theme.bold(MCP_PROXY))} ${theme.fg("muted", `· ${proxyDescription(args)}`)}`;
@@ -394,8 +402,8 @@ export default function (_pi: ExtensionAPI): void {
 		renderCall: (_toolName, args, theme, context) => renderCall(args, theme, context),
 		renderResult: (_toolName, result, options, theme, context) => renderResult(result as ScriptResult, options, theme, context),
 	});
-	registerToolRenderer([MCP_PROXY], {
-		renderCall: (_toolName, args, theme, context) => renderProxyCall(args, theme, context),
+	registerToolRenderer([MCP_PROXY, MCP_NAMESPACE_PROXY], {
+		renderCall: (toolName, args, theme, context) => renderProxyCall(toolName, args, theme, context),
 		renderResult: (_toolName, result, options, theme, context) => renderProxyResult(result as ScriptResult, options, theme, context),
 	});
 }
