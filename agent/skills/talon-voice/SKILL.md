@@ -46,6 +46,7 @@ commands and actions.
    - [Voice coding](references/voice-coding.md)
    - [Sources and version notes](references/source-index.md)
    - [Community compatibility](references/community.md)
+   - [Community tag reference](references/community-tags.md) — inventory and activation guidance for reusable capability/state tags
 
 ## Community compatibility gate
 
@@ -60,8 +61,12 @@ tags they support and implement those contracts in a narrow `Context`.
 
 Prefer existing Community `app.*`, `edit.*`, `win.*`, `code.*`, and `user.*`
 actions, tags, lists, captures, formatters, and snippets over parallel personal
-names. Put personal grammar/behavior next to Community rather than editing the
-checkout. For a standard Community contract, it is appropriate for a personal
+names. Before adding application commands, inventory applicable Community tags
+and global core commands, read each candidate tag's grammar and action contract,
+activate every capability the application genuinely supports, and implement its
+actions in a narrow Context. Do not activate a tag merely for vocabulary when
+its semantics do not fit. Put personal grammar/behavior next to Community rather
+than editing the checkout. For a standard Community contract, it is appropriate for a personal
 Context to implement an action such as `app.tab_next`; for new personal APIs,
 use a distinctive `user.` prefix. Preserve Community's object-then-verb command
 style, stable app matchers (`app.bundle` on macOS, the documented Windows
