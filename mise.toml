@@ -3,3 +3,4 @@
 "aqua:rtk-ai/rtk" = "latest"
 "npm:chrome-devtools-mcp" = "latest"
 "npm:@earendil-works/pi-coding-agent" = "latest"
+uv = "latest"

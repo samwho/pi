@@ -1,5 +1,6 @@
 import { highlightCode, type ExtensionAPI, type Theme } from "@earendil-works/pi-coding-agent";
 import { visibleWidth, type Component } from "@earendil-works/pi-tui";
+import { detectedCodeLanguage } from "./shared/code-language.ts";
 import { DynamicText } from "./shared/dynamic-text.ts";
 import {
 	frameBodyLines,
@@ -178,14 +179,14 @@ function isJson(text: string): boolean {
 	}
 }
 
-function outputLanguage(text: string, mimeType?: string): "json" | "markdown" | undefined {
+function outputLanguage(text: string, mimeType?: string, onDetected?: () => void): string | undefined {
 	if (mimeType?.includes("json") || isJson(text)) return "json";
 	const trimmed = text.trim();
 	if (/^(#{1,6}\s|[-*+]\s|>\s|```|\[[^\]]+\]\([^\)]+\))/m.test(trimmed)) return "markdown";
-	return undefined;
+	return detectedCodeLanguage(text, onDetected);
 }
 
-function highlightLines(lines: string[], language: "json" | "markdown" | undefined): string[] {
+function highlightLines(lines: string[], language: string | undefined): string[] {
 	if (!language) return lines;
 	try {
 		return highlightCode(lines.join("\n"), language);
@@ -194,12 +195,12 @@ function highlightLines(lines: string[], language: "json" | "markdown" | undefin
 	}
 }
 
-function outputLines(result: ScriptResult, theme: RenderTheme): string[] {
+function outputLines(result: ScriptResult, theme: RenderTheme, onDetected?: () => void): string[] {
 	const lines: string[] = [];
 	for (const block of result.content ?? []) {
 		if (block.type === "text") {
 			const plain = prettyOutputText(block.text ?? "");
-			const highlighted = highlightLines(plain, outputLanguage(block.text ?? "", block.mimeType));
+			const highlighted = highlightLines(plain, outputLanguage(block.text ?? "", block.mimeType, onDetected));
 			for (let index = 0; index < highlighted.length; index++) {
 				const original = plain[index] ?? "";
 				const line = highlighted[index] ?? original;
@@ -318,7 +319,7 @@ function renderResult(
 	const expanded = options.expanded === true;
 	const details = asRecord(result.details);
 	const calls = asCalls(details?.calls);
-	const allOutput = outputLines(result, theme);
+	const allOutput = outputLines(result, theme, context.invalidate);
 	const errorMessage = asString(details?.message);
 	const failed = context.isError === true || asString(details?.error) !== undefined;
 	const status: FrameStatus = failed ? "error" : options.isPartial ? "pending" : "success";
@@ -376,7 +377,7 @@ function renderProxyResult(
 			].join("\n");
 		}
 
-		const output = outputLines(result, theme);
+		const output = outputLines(result, theme, context.invalidate);
 		const body = [
 			frameBodyLine(theme, status, outputDivider(theme, Math.max(1, width - 2)), width),
 			...output.slice(0, outputLimit).map((line) => frameBodyLine(theme, status, line, width)),
