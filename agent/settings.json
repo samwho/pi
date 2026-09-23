@@ -1,5 +1,5 @@
 {
-  "lastChangelogVersion": "0.85.1",
+  "lastChangelogVersion": "0.87.0",
   "theme": "dark",
   "quietStartup": true,
   "defaultProvider": "openai-codex",
@@ -10,7 +10,7 @@
   "defaultProjectTrust": "ask",
   "showCacheMissNotices": true,
   "pi-gpt-fast-mode": {
-    "enabled": false
+    "enabled": true
   },
   "terminal": {
     "showTerminalProgress": true
