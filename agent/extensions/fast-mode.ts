@@ -17,6 +17,8 @@ const SUPPORTED_MODELS = new Set([
   "openai/gpt-5.6-sol",
   "openai/gpt-5.6-terra",
   "openai/gpt-5.6-luna",
+  "openai/gpt-6-luna",
+  "openai/gpt-6-sol",
   "openai-codex/gpt-5.4",
   "openai-codex/gpt-5.4-mini",
   "openai-codex/gpt-5.5",
@@ -24,6 +26,8 @@ const SUPPORTED_MODELS = new Set([
   "openai-codex/gpt-5.6-sol",
   "openai-codex/gpt-5.6-terra",
   "openai-codex/gpt-5.6-luna",
+  "openai-codex/gpt-6-luna",
+  "openai-codex/gpt-6-sol",
 ]);
 
 type JsonObject = Record<string, unknown>;
@@ -35,9 +39,8 @@ type ModelPreset = {
 };
 
 const MODEL_PRESETS = {
-  luna: { modelId: "gpt-5.6-luna", thinking: "xhigh", fast: true },
-  terra: { modelId: "gpt-5.6-terra", thinking: "medium", fast: false },
-  sol: { modelId: "gpt-5.6-sol", thinking: "medium", fast: false },
+  luna: { modelId: "gpt-6-luna", thinking: "xhigh", fast: true },
+  sol: { modelId: "gpt-6-sol", thinking: "medium", fast: false },
 } satisfies Record<string, ModelPreset>;
 
 type PiFileOptions = {
