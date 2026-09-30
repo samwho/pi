@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { initTheme, ToolExecutionComponent, type Theme } from "@earendil-works/pi-coding-agent";
-import type { Component } from "@earendil-works/pi-tui";
+import { Text, type Component } from "@earendil-works/pi-tui";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { defaultConfig, saveConfig } from "../config.ts";
 import { limitResultPreview } from "./result-preview.ts";
@@ -85,6 +85,57 @@ describe("tool result preview", () => {
 		expect(collapsed).toContain("… 46 more lines");
 		tool.setExpanded(true);
 		expect(tool.render(100).join("\n")).toContain("line 85");
+	});
+
+	it.each(["read", "bash"])("keeps %s framed across component reuse and expansion", (name) => {
+		initTheme();
+		registerToolRenderer([], {
+			renderCall: () => component,
+			renderResult: () => component,
+		});
+		const reused: Text[] = [];
+		const definition = {
+			renderShell: "self",
+			renderCall: () => new Text(`╭── ${name} ─────`, 0, 0),
+			renderResult: (
+				_result: unknown,
+				_options: unknown,
+				_theme: unknown,
+				context: { lastComponent?: Text },
+			) => {
+				const text = context.lastComponent ?? new Text("", 0, 0);
+				text.setText([...rows, "╰────────"].join("\n"));
+				reused.push(text);
+				return text;
+			},
+		};
+		const tool = new ToolExecutionComponent(
+			name,
+			"reuse-test",
+			{},
+			{},
+			definition as never,
+			{ requestRender: () => {} } as never,
+			process.cwd(),
+		);
+		tool.updateResult({ content: [{ type: "text", text: "unframed fallback" }], isError: false });
+		const assertFramed = () => {
+			const rendered = tool.render(100).join("\n");
+			expect(rendered).toContain("│ line 1");
+			expect(rendered).toContain("╰────────");
+			expect(rendered).not.toContain("unframed fallback");
+		};
+		assertFramed();
+		tool.invalidate();
+		assertFramed();
+		tool.setExpanded(true);
+		assertFramed();
+		expect(tool.render(100).join("\n")).toContain("│ line 85");
+		tool.setExpanded(false);
+		tool.invalidate();
+		assertFramed();
+		expect(reused).toHaveLength(5);
+		expect(reused.every((text) => text === reused[0])).toBe(true);
 	});
 
 	it("also limits results without a visual frame", () => {

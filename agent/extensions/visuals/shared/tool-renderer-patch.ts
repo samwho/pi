@@ -6,6 +6,7 @@ import { previewLineLimit } from "../config.ts";
 /** The public portion of Pi's renderer context used by local decorations. */
 export type ToolRenderContext = {
 	toolCallId?: string;
+	lastComponent?: Component;
 	argsComplete?: boolean;
 	expanded?: boolean;
 	isError?: boolean;
@@ -57,6 +58,7 @@ type PatchState = {
 	originalFormatToolExecution?: (this: InternalToolExecution) => string;
 	renderers: Map<string, RegisteredRenderer>;
 	decorators: Map<string, ResultDecorator>;
+	previewComponents?: WeakMap<Component, Component>;
 };
 
 const PATCH = Symbol.for("pi.local-tool-renderer.patch");
@@ -118,6 +120,7 @@ export function registerToolRenderer(
 	// helper gains new capabilities. Refresh every dispatcher so wildcard
 	// renderers and decorators also work without restarting Pi.
 	state.decorators ??= new Map();
+	state.previewComponents ??= new WeakMap();
 	state.originalFormatToolExecution ??=
 		typeof prototype.formatToolExecution === "function"
 			? (prototype.formatToolExecution as PatchState["originalFormatToolExecution"])
@@ -165,16 +168,29 @@ export function registerToolRenderer(
 			theme: Theme,
 			context: ToolRenderContext,
 		) => {
-			const decorated = decorator ? decorator(toolName, result, options, theme, context) : result;
+			// Pi returns our preview wrapper as lastComponent on the next redraw.
+			// Renderers must receive their own component (e.g. Text with setText),
+			// not the display-only wrapper, or Pi silently falls back to plain output.
+			const lastComponent = context.lastComponent;
+			const renderContext = lastComponent
+				? {
+						...context,
+						lastComponent: state.previewComponents!.get(lastComponent) ?? lastComponent,
+					}
+				: context;
+			const decorated = decorator
+				? decorator(toolName, result, options, theme, renderContext)
+				: result;
 			const component = (resultRenderer as (...args: unknown[]) => Component | undefined)(
 				decorated,
 				options,
 				theme,
-				context,
+				renderContext,
 			);
-			return component
-				? limitResultPreview(component, toolName, options.expanded, theme, context)
-				: component;
+			if (!component) return component;
+			const preview = limitResultPreview(component, toolName, options.expanded, theme, context);
+			if (preview !== component) state.previewComponents!.set(preview, component);
+			return preview;
 		};
 	};
 	for (const toolName of toolNames) state.renderers.set(toolName, renderer);
