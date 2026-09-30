@@ -1,3 +1,6 @@
+[settings]
+minimum_release_age = "0h"
+
 [tools]
 "aqua:betterleaks/betterleaks" = "latest"
 "aqua:rtk-ai/rtk" = "latest"
