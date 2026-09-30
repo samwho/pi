@@ -11,8 +11,7 @@ import {
 } from "./shared/tool-frame.ts";
 import { registerToolRenderer, type ToolRenderContext } from "./shared/tool-renderer-patch.ts";
 
-/** Give pi-web-search the same framed tool treatment as mcpScript without
- * replacing its tools or depending on its private implementation. */
+/** Give pi-web-search framed tool output without replacing its tools. */
 
 const WEB_TOOLS = new Set(["web_search"]);
 const DEFAULT_COLLAPSED_OUTPUT_LINES = 6;

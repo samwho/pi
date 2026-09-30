@@ -3,7 +3,7 @@
   "theme": "dark",
   "quietStartup": true,
   "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-6-sol",
+  "defaultModel": "gpt-6.1-sol",
   "defaultThinkingLevel": "medium",
   "tuiMode": "fullscreen",
   "fullscreenScrollbar": "hidden",
@@ -18,7 +18,6 @@
   "steeringMode": "one-at-a-time",
   "packages": [
     "git:github.com/badlogic/pi-skills",
-    "npm:pi-mcp-adapter@2.32.1",
     "npm:@pi-plugins/usage",
     "npm:@wierdbytes/pi-facelift",
     "npm:pi-context-view",

@@ -3,6 +3,7 @@ import type { Component } from "@earendil-works/pi-tui";
 
 /** The public portion of Pi's renderer context used by local decorations. */
 export type ToolRenderContext = {
+	toolCallId?: string;
 	expanded?: boolean;
 	isError?: boolean;
 	isPartial?: boolean;

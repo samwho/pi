@@ -49,7 +49,7 @@ Pi reads this checkout through its standard paths:
 | `agent/extensions/` | Local Pi extensions. |
 | `agent/skills/` | Local skills maintained by this repository. |
 | `agent/APPEND_SYSTEM.md` | Additional global agent instructions. |
-| `agent/mcp.json` | MCP adapter configuration. |
+| `agent/mcp.json` | Built-in MCP server configuration. |
 | `mise.toml` | Pi and shared CLI tool installation. |
 
 Credentials, sessions, installed package contents, and other mutable state are
