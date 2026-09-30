@@ -11,8 +11,10 @@ export type HeadingArgument = {
 export type ToolHeading = {
 	name: string;
 	arguments?: HeadingArgument[];
-	/** Lines after the first, e.g. a multi-line shell command. */
+	/** Additional lines of the primary argument, e.g. a multi-line shell command. */
 	continuations?: string[];
+	/** Muted secondary arguments shown below the headline, after any continuations. */
+	details?: string[];
 	boldName?: boolean;
 };
 
@@ -27,7 +29,8 @@ export function formatToolHeading(theme: Theme, heading: ToolHeading): string {
 			})
 			.join("");
 	const continuations = heading.continuations?.map((line) => theme.fg("accent", line)) ?? [];
-	return [firstLine, ...continuations].join("\n");
+	const details = heading.details?.map((line) => theme.fg("muted", line)) ?? [];
+	return [firstLine, ...continuations, ...details].join("\n");
 }
 
 /** One call-header path for built-in tools, codemode, and MCP-backed tools. */

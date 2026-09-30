@@ -8,6 +8,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
 import { detectedCodeLanguage } from "../shared/code-language.ts";
+import { previewLineLimit } from "../config.ts";
 import { DynamicText } from "../shared/dynamic-text.ts";
 import {
 	registerToolResultDecorator,
@@ -15,12 +16,12 @@ import {
 	type ToolResult,
 } from "../shared/tool-renderer-patch.ts";
 
-const FALLBACK_PREVIEW_LINES = 10;
 const PATCH = Symbol.for("pi.local-code-output-highlighter.patch");
 
 type InternalToolExecution = {
 	expanded?: boolean;
 	isPartial?: boolean;
+	toolName?: string;
 	ui?: { requestRender?: () => void };
 	getTextOutput?: () => string;
 };
@@ -57,31 +58,33 @@ export function genericFallback(
 ): Component | undefined {
 	const fallback = original.call(instance);
 	const output = instance.getTextOutput?.() ?? "";
-	if (!fallback || !output || instance.isPartial || /\x1b(?:\[|\])/.test(output)) return fallback;
+	if (!fallback || !output || instance.isPartial) return fallback;
+	const hasAnsi = /\x1b(?:\[|\])/.test(output);
 
 	let component: DynamicText | undefined;
 	const language = () =>
-		detectedCodeLanguage(output, () => {
-			component?.invalidate();
-			instance.ui?.requestRender?.();
-		});
+		hasAnsi
+			? undefined
+			: detectedCodeLanguage(output, () => {
+					component?.invalidate();
+					instance.ui?.requestRender?.();
+				});
 	// Start detection now rather than waiting for the first terminal render.
 	language();
 
-	component = new DynamicText((width) => {
+	component = new DynamicText(() => {
 		const detected = language();
-		if (!detected) return fallback.render(width);
-
 		const lines = output.split("\n");
-		const shown = instance.expanded ? lines : lines.slice(0, FALLBACK_PREVIEW_LINES);
-		const highlighted = highlightedLines(shown.join("\n"), detected);
-		if (!highlighted) return fallback.render(width);
+		const limit = previewLineLimit(instance.toolName ?? "");
+		const shown = instance.expanded || lines.length <= limit ? lines : lines.slice(0, limit - 1);
+		const highlighted = detected ? highlightedLines(shown.join("\n"), detected) : undefined;
+		const rendered = highlighted ?? shown;
 		if (shown.length < lines.length) {
-			highlighted.push(
+			rendered.push(
 				`... (${lines.length - shown.length} more lines, ${keyHint("app.tools.expand", "to expand")})`,
 			);
 		}
-		return highlighted;
+		return rendered;
 	}, true);
 	return component;
 }

@@ -1,4 +1,26 @@
 {
   "diffLayout": "unified",
-  "showWorkingTime": false
+  "showWorkingTime": false,
+  "previewLines": {
+    "default": 40,
+    "read": 10,
+    "grep": 10
+  },
+  "highlight": {
+    "theme": "auto",
+    "maxChars": 80000,
+    "cacheLimit": 128
+  },
+  "diff": {
+    "theme": "github-dark",
+    "preset": "default",
+    "colors": {},
+    "maxChars": 80000,
+    "cacheLimit": 192,
+    "splitMinWidth": 150,
+    "splitMinCodeWidth": 60
+  },
+  "icons": "nerd",
+  "imageProtocol": "auto",
+  "quoteUrl": "https://quotes.samwho.dev/random"
 }

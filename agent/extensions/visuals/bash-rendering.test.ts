@@ -1,3 +1,4 @@
+import { createBashToolDefinition } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
 
@@ -23,6 +24,11 @@ const ansiMockTheme = {
 	fg: (_key: string, text: string) => `\x1b[31m${text}\x1b[0m`,
 	bold: (text: string) => `\x1b[1m${text}\x1b[22m`,
 };
+const statusTheme = {
+	fg: (key: string, text: string) =>
+		`\x1b[${key === "error" ? 31 : key === "success" ? 32 : key === "warning" ? 33 : 37}m${text}\x1b[0m`,
+	bold: (text: string) => text,
+};
 
 function mockToolFactory(exec: any) {
 	return (_cwd: string) => ({
@@ -47,7 +53,7 @@ function withStdoutColumns<T>(columns: number, fn: () => T): T {
 	}
 }
 
-function loadBashTool() {
+function loadBashTool(bashExec?: any) {
 	const noopExec = async () => ({ content: [{ type: "text", text: "" }] });
 	const tools = new Map<string, any>();
 	const pi = {
@@ -61,7 +67,7 @@ function loadBashTool() {
 	piFaceliftExtension(pi, {
 		sdk: {
 			createReadToolDefinition: mockToolFactory(noopExec),
-			createBashToolDefinition: mockToolFactory(noopExec),
+			createBashToolDefinition: mockToolFactory(bashExec ?? noopExec),
 			createLsToolDefinition: mockToolFactory(noopExec),
 			createFindToolDefinition: mockToolFactory(noopExec),
 			createGrepToolDefinition: mockToolFactory(noopExec),
@@ -130,6 +136,25 @@ describe("bash renderCall expansion", () => {
 
 		expect(collapsed.getText()).toContain("5s timeout");
 		expect(expanded.getText()).toContain("5s timeout");
+	});
+
+	it("shows timeout below a long command even when the command is truncated", () => {
+		withStdoutColumns(48, () => {
+			const bashTool = loadBashTool();
+			const command = `printf '${"x".repeat(120)}'`;
+			const rendered = bashTool.renderCall({ command, timeout: 30 }, mockTheme, {
+				lastComponent: new MockText(),
+				isError: false,
+				state: {},
+				expanded: false,
+				invalidate: () => {},
+			});
+			const lines = rendered.getText().split("\n");
+			expect(lines).toHaveLength(2);
+			expect(lines[0]).not.toContain("timeout");
+			expect(lines[1]).toContain("30s timeout");
+			for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(48);
+		});
 	});
 
 	it("truncates expanded ANSI tool headers to fit the terminal width", () => {
@@ -283,6 +308,166 @@ describe("bash renderCall expansion", () => {
 			expect(lines[0]).toContain("\x1b[36mcd /tmp");
 			expect(lines[1]).toContain("\x1b[36mecho hi");
 		});
+	});
+});
+
+describe("bash status colours", () => {
+	it("preserves a real nonzero bash exit and its structured exit code", async () => {
+		const native = createBashToolDefinition(process.cwd(), { exposeSessionEnvironment: false });
+		const bashTool = loadBashTool(native.execute.bind(native));
+		const result = await bashTool.execute(
+			"bash-status-test",
+			{ command: "printf 'failed\\n'; exit 7" },
+			undefined,
+			undefined,
+			{ cwd: process.cwd() },
+		);
+		expect(result.isError).toBe(true);
+		expect(result.structuredContent.exit_code).toBe(7);
+		expect(result.details.exitCode).toBe(7);
+	});
+
+	it("uses yellow while running and green after a successful exit", () => {
+		const bashTool = loadBashTool();
+		const state = {};
+		const ctx = {
+			lastComponent: new MockText(),
+			state,
+			isPartial: true,
+			isError: false,
+			expanded: false,
+			invalidate: () => {},
+		};
+		expect(bashTool.renderCall({ command: "echo hi" }, statusTheme, ctx).getText()).toContain(
+			"\x1b[33m╭",
+		);
+		expect(
+			bashTool
+				.renderResult(
+					{ content: [{ type: "text", text: "still running" }] },
+					{ isPartial: true, expanded: false },
+					statusTheme,
+					ctx,
+				)
+				.getText(),
+		).toContain("\x1b[33m╰");
+		ctx.isPartial = false;
+		expect(bashTool.renderCall({ command: "echo hi" }, statusTheme, ctx).getText()).toContain(
+			"\x1b[32m╭",
+		);
+		expect(
+			bashTool
+				.renderResult(
+					{
+						content: [{ type: "text", text: "hi" }],
+						details: { _type: "bashResult", text: "hi", exitCode: 0, command: "echo hi" },
+					},
+					{ isPartial: false, expanded: false },
+					statusTheme,
+					ctx,
+				)
+				.getText(),
+		).toContain("\x1b[32m╰");
+	});
+
+	it("uses red for errors flagged by Pi without an extra redraw", () => {
+		const bashTool = loadBashTool();
+		let invalidations = 0;
+		const ctx = {
+			lastComponent: new MockText(),
+			state: {},
+			isPartial: false,
+			isError: true,
+			expanded: false,
+			invalidate: () => {
+				invalidations++;
+			},
+		};
+		expect(bashTool.renderCall({ command: "exit 7" }, statusTheme, ctx).getText()).toContain(
+			"\x1b[31m╭",
+		);
+		expect(
+			bashTool
+				.renderResult(
+					{
+						content: [{ type: "text", text: "failed" }],
+						details: { _type: "bashResult", text: "failed", exitCode: 7, command: "exit 7" },
+					},
+					{ isPartial: false, expanded: false },
+					statusTheme,
+					ctx,
+				)
+				.getText(),
+		).toContain("\x1b[31m╰");
+		expect(invalidations).toBe(0);
+	});
+
+	it("uses red for timeouts and aborts even when the host error flag is missing", async () => {
+		const bashTool = loadBashTool();
+		for (const message of ["Command timed out after 5 seconds", "Command aborted"]) {
+			let invalidations = 0;
+			const ctx = {
+				lastComponent: new MockText(),
+				state: {},
+				isPartial: false,
+				isError: false,
+				expanded: false,
+				invalidate: () => {
+					invalidations++;
+				},
+			};
+			const rendered = bashTool.renderResult(
+				{ content: [{ type: "text", text: message }] },
+				{ isPartial: false, expanded: false },
+				statusTheme,
+				ctx,
+			);
+			expect(rendered.getText()).toContain("\x1b[31m╰");
+			await Promise.resolve();
+			expect(invalidations).toBe(1);
+			expect(bashTool.renderCall({ command: "sleep 10" }, statusTheme, ctx).getText()).toContain(
+				"\x1b[31m╭",
+			);
+		}
+	});
+
+	it("uses red for a nonzero exit even when the host error flag is missing", async () => {
+		const bashTool = loadBashTool();
+		let invalidations = 0;
+		const state = {};
+		const ctx = {
+			lastComponent: new MockText(),
+			state,
+			isPartial: false,
+			isError: false,
+			expanded: false,
+			invalidate: () => {
+				invalidations++;
+			},
+		};
+		// Pi renders the call header before the result. The result must correct
+		// both borders when the command reports failure in its exit status.
+		bashTool.renderCall({ command: "exit 7" }, statusTheme, ctx);
+		const result = bashTool.renderResult(
+			{
+				content: [{ type: "text", text: "Command exited with code 7" }],
+				details: {
+					_type: "bashResult",
+					text: "Command exited with code 7",
+					exitCode: 0,
+					command: "exit 7",
+				},
+			},
+			{ isPartial: false, expanded: false },
+			statusTheme,
+			ctx,
+		);
+		expect(result.getText()).toContain("\x1b[31m╰");
+		await Promise.resolve();
+		expect(invalidations).toBe(1);
+		expect(bashTool.renderCall({ command: "exit 7" }, statusTheme, ctx).getText()).toContain(
+			"\x1b[31m╭",
+		);
 	});
 });
 

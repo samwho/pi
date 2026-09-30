@@ -76,7 +76,9 @@ import {
 } from "./common/diff/index.ts";
 import { openSettingsModal, type Field } from "./common/settings/index.ts";
 import {
-	envDefaults as faceliftEnvDefaults,
+	defaultConfig as faceliftDefaults,
+	loadConfig,
+	previewLineLimit,
 	getConfigPath as getFaceliftConfigPath,
 	loadOrInitConfig as loadFaceliftConfig,
 	saveConfig as saveFaceliftConfig,
@@ -98,6 +100,7 @@ import {
 	frameResultWithBottomLabel,
 	getFrameStatus,
 	renderToolError,
+	type FrameStatus,
 } from "./common/tool-frame/index.ts";
 import type { BundledLanguage, BundledTheme } from "shiki";
 import { frameToolCall } from "./shared/tool-heading.ts";
@@ -122,6 +125,9 @@ const DEFAULT_THEME: BundledTheme = "github-dark";
  * back to plain text — leaving every `read` body uncolored.
  */
 const THEME_ALIASES: Record<string, BundledTheme> = {
+	// Pi's built-in theme names are not Shiki theme names.
+	dark: "github-dark",
+	light: "github-light",
 	// Tokyo Night family (storm/night/day are Tokyo Night palette variants;
 	// Shiki only ships the storm-equivalent under the bare `tokyo-night` name).
 	"tokyo-night-storm": "tokyo-night",
@@ -163,7 +169,7 @@ function warnInvalidTheme(rawName: string, fallback: BundledTheme): void {
 	console.error(
 		`visuals: theme "${rawName}" is not a Shiki bundled theme; ` +
 			`falling back to "${fallback}". ` +
-			`Set FACELIFT_THEME to one of: ${Object.keys(bundledThemes).sort().join(", ")}.`,
+			`Set highlight.theme in visuals/config.json to one of: ${Object.keys(bundledThemes).sort().join(", ")}.`,
 	);
 }
 
@@ -199,7 +205,8 @@ function readThemeFromSettings(agentDir?: string): string | undefined {
 }
 
 function resolvePrettyTheme(agentDir?: string): BundledTheme {
-	const raw = process.env.FACELIFT_THEME ?? readThemeFromSettings(agentDir);
+	const configured = loadConfig().highlight.theme;
+	const raw = configured === "auto" ? readThemeFromSettings(agentDir) : configured;
 	return resolveBundledTheme(raw);
 }
 
@@ -223,14 +230,8 @@ function setPrettyTheme(agentDir?: string): void {
 	codeToANSI("", "typescript", THEME).catch(() => {});
 }
 
-function envInt(name: string, fallback: number): number {
-	const v = Number.parseInt(process.env[name] ?? "", 10);
-	return Number.isFinite(v) && v > 0 ? v : fallback;
-}
-
-const MAX_HL_CHARS = envInt("FACELIFT_MAX_HL_CHARS", 80_000);
-const MAX_PREVIEW_LINES = envInt("FACELIFT_MAX_PREVIEW_LINES", 80);
-const CACHE_LIMIT = envInt("FACELIFT_CACHE_LIMIT", 128);
+const MAX_HL_CHARS = loadConfig().highlight.maxChars;
+const CACHE_LIMIT = loadConfig().highlight.cacheLimit;
 
 // ---------------------------------------------------------------------------
 // ANSI
@@ -499,7 +500,7 @@ function getOuterTerminal(): string {
 }
 
 function detectImageProtocol(): ImageProtocol {
-	const forced = (process.env.FACELIFT_IMAGE_PROTOCOL ?? "").toLowerCase();
+	const forced = loadConfig().imageProtocol;
 	if (forced === "kitty" || forced === "iterm2" || forced === "none") {
 		return forced;
 	}
@@ -588,11 +589,10 @@ function humanSize(bytes: number): string {
 // File-type icons — Nerd Font glyphs (Seti-UI + Devicons, stable in NF v3+)
 //
 // Requires a Nerd Font installed (e.g., JetBrainsMono Nerd Font, FiraCode NF).
-// Fallback: set FACELIFT_ICONS=none to disable icons.
+// Set icons to "none" in visuals/config.json to disable icons.
 // ---------------------------------------------------------------------------
 
-const ICONS_MODE = (process.env.FACELIFT_ICONS ?? "nerd").toLowerCase();
-const USE_ICONS = ICONS_MODE !== "none" && ICONS_MODE !== "off";
+const USE_ICONS = loadConfig().icons !== "none";
 
 // Nerd Font codepoints + ANSI color per file type
 const NF_DIR = `${FG_BLUE}\ue5ff${RST}`; // folder
@@ -764,14 +764,14 @@ async function renderFileContent(
 	content: string,
 	filePath: string,
 	offset = 1,
-	maxLines = MAX_PREVIEW_LINES,
+	maxLines = previewLineLimit("read"),
 ): Promise<string> {
 	const normalizedContent = normalizeLineEndings(content);
 	const lines = normalizedContent.split("\n");
 	const total = lines.length;
 	const show = lines.slice(0, maxLines);
 	const lg = lang(filePath);
-	const hl = await hlBlock(show.join("\n"), lg);
+	const hl = show.length ? await hlBlock(show.join("\n"), lg) : [];
 
 	// Reserve 1 col for the outer frame's `│` rail (drawn later by
 	// `frameBodyLines`) so the highlighted lines fit inside the frame.
@@ -792,7 +792,9 @@ async function renderFileContent(
 	}
 
 	if (total > maxLines) {
-		out.push(`${FG_DIM}  … ${total - maxLines} more lines (${total} total)${RST}`);
+		out.push(
+			`${FG_DIM}  … ${total - maxLines} more lines (${total} total) · Ctrl+O to expand${RST}`,
+		);
 	}
 	return out.join("\n");
 }
@@ -803,12 +805,11 @@ function renderTree(text: string, _basePath: string): string {
 	if (!lines.length) return `${FG_DIM}(empty directory)${RST}`;
 
 	const out: string[] = [];
-	const total = lines.length;
-	const show = lines.slice(0, MAX_PREVIEW_LINES);
+	const show = lines;
 
 	for (let i = 0; i < show.length; i++) {
 		const entry = show[i].trim();
-		const isLast = i === show.length - 1 && total <= MAX_PREVIEW_LINES;
+		const isLast = i === show.length - 1;
 		const prefix = isLast ? "└── " : "├── ";
 		const connector = `${FG_RULE}${prefix}${RST}`;
 
@@ -820,10 +821,6 @@ function renderTree(text: string, _basePath: string): string {
 		const reset = isDir ? RST : "";
 
 		out.push(`${connector}${icon}${fg}${name}${reset}`);
-	}
-
-	if (total > MAX_PREVIEW_LINES) {
-		out.push(`${FG_RULE}└── ${RST}${FG_DIM}… ${total - MAX_PREVIEW_LINES} more entries${RST}`);
 	}
 
 	return out.join("\n");
@@ -852,10 +849,6 @@ function renderFindResults(text: string): string {
 		if (count > 0) out.push(""); // blank line between groups
 		out.push(`${dirIcon()}${FG_BLUE}${BOLD}${dir}/${RST}`);
 		for (let i = 0; i < files.length; i++) {
-			if (count >= MAX_PREVIEW_LINES) {
-				out.push(`  ${FG_DIM}… ${lines.length - count} more files${RST}`);
-				return out.join("\n");
-			}
 			const isLast = i === files.length - 1;
 			const prefix = isLast ? "└── " : "├── ";
 			const icon = fileIcon(files[i]);
@@ -868,14 +861,13 @@ function renderFindResults(text: string): string {
 }
 
 /** Render grep results with highlighted matches and line numbers. */
-async function renderGrepResults(text: string, pattern: string): Promise<string> {
+async function renderGrepResults(text: string, pattern: string, maxRows: number): Promise<string> {
 	const lines = normalizeLineEndings(text).split("\n");
 	if (!lines.length || (lines.length === 1 && !lines[0].trim()))
 		return `${FG_DIM}(no matches)${RST}`;
 
 	const out: string[] = [];
 	let currentFile = "";
-	let count = 0;
 
 	// Try to build a regex for highlighting
 	let re: RegExp | null = null;
@@ -885,12 +877,13 @@ async function renderGrepResults(text: string, pattern: string): Promise<string>
 		// invalid regex — skip highlighting
 	}
 
-	for (const line of lines) {
-		if (count >= MAX_PREVIEW_LINES) {
-			out.push(`${FG_DIM}  … more matches${RST}`);
+	for (let index = 0; index < lines.length; index++) {
+		if (out.length >= maxRows - 1 && index < lines.length - 1) {
+			out.splice(Math.max(0, maxRows - 1));
+			out.push(`${FG_DIM}  … ${lines.length - index} more lines · Ctrl+O to expand${RST}`);
 			break;
 		}
-
+		const line = lines[index];
 		// ripgrep-style: "file:line:content" or "file-line-content" or just "file"
 		const fileMatch = line.match(/^(.+?)[:-](\d+)[:-](.*)$/);
 		if (fileMatch) {
@@ -908,16 +901,18 @@ async function renderGrepResults(text: string, pattern: string): Promise<string>
 				display = content.replace(re, `${RST}${FG_YELLOW}${BOLD}$1${RST}`);
 			}
 			out.push(`  ${lnum(Number(lineNo), nw)} ${FG_RULE}│${RST} ${display}${RST}`);
-			count++;
 		} else if (line.trim() === "--") {
 			// ripgrep separator
 			out.push(`  ${FG_DIM}  ···${RST}`);
 		} else if (line.trim()) {
 			out.push(line);
-			count++;
 		}
 	}
 
+	if (out.length > maxRows)
+		return [...out.slice(0, maxRows - 1), `${FG_DIM}  … more lines · Ctrl+O to expand${RST}`].join(
+			"\n",
+		);
 	return out.join("\n");
 }
 
@@ -1020,6 +1015,7 @@ type BashRenderState = {
 	startedAt?: number;
 	endedAt?: number;
 	interval?: NodeJS.Timeout;
+	finalStatus?: FrameStatus;
 };
 type FindResultDetails = { _type: "findResult"; text: string; pattern: string; matchCount: number };
 type GrepResultDetails = { _type: "grepResult"; text: string; pattern: string; matchCount: number };
@@ -1151,7 +1147,7 @@ export default function registerBuiltinTools(pi: BuiltinToolApi, deps?: BuiltinT
 		try {
 			return loadFaceliftConfig();
 		} catch {
-			return faceliftEnvDefaults();
+			return faceliftDefaults();
 		}
 	})();
 
@@ -1305,13 +1301,15 @@ export default function registerBuiltinTools(pi: BuiltinToolApi, deps?: BuiltinT
 				frameToolCall(
 					{
 						name: "read",
-						arguments: [
-							{ value: sp(fp) },
-							...(args.offset
-								? [{ value: `from line ${args.offset}`, color: "muted" as const }]
-								: []),
-							...(args.limit ? [{ value: `(${args.limit} lines)`, color: "muted" as const }] : []),
-						],
+						arguments: [{ value: sp(fp) }],
+						details: [
+							[
+								args.offset ? `from line ${args.offset}` : "",
+								args.limit ? `(${args.limit} lines)` : "",
+							]
+								.filter(Boolean)
+								.join(" "),
+						].filter(Boolean),
 					},
 					getFrameStatus(ctx),
 					asTheme(theme),
@@ -1360,14 +1358,15 @@ export default function registerBuiltinTools(pi: BuiltinToolApi, deps?: BuiltinT
 			}
 
 			if (d?._type === "readFile" && d.content) {
-				const key = `read:${d.filePath}:${d.offset}:${d.lineCount}:${w}:${status}`;
+				const key = `read:${d.filePath}:${d.offset}:${d.lineCount}:${w}:${status}:${ctx.expanded}:${previewLineLimit("read")}`;
 				if (ctx.state._rk !== key) {
 					ctx.state._rk = key;
 					// Initial render: just the frame chrome until shiki resolves.
 					// Once `renderFileContent` returns we re-cache with the highlighted body.
 					ctx.state._rt = frameResult("", status, t, w);
 
-					const maxShow = ctx.expanded ? d.lineCount : MAX_PREVIEW_LINES;
+					const limit = previewLineLimit("read");
+					const maxShow = ctx.expanded || d.lineCount <= limit ? d.lineCount : limit - 1;
 					renderFileContent(d.content, d.filePath, d.offset, maxShow)
 						.then((rendered: string) => {
 							if (ctx.state._rk !== key) return;
@@ -1389,7 +1388,7 @@ export default function registerBuiltinTools(pi: BuiltinToolApi, deps?: BuiltinT
 			// Fallback
 			const fallback = result.content?.[0];
 			const fallbackText = fallback && isTextContent(fallback) ? fallback.text : "read";
-			text.setText(frameResult(theme.fg("dim", fallbackText.slice(0, 120)), status, t, w));
+			text.setText(frameResult(theme.fg("dim", fallbackText), status, t, w));
 			return text;
 		},
 	});
@@ -1416,9 +1415,13 @@ export default function registerBuiltinTools(pi: BuiltinToolApi, deps?: BuiltinT
 				const result = await origBash.execute(tid, params, sig, upd, ctx);
 				const textContent = getTextContent(result);
 
-				let exitCode: number | null = 0;
-				if (textContent) {
-					const exitMatch = textContent.match(/(?:exit code|exited with|exit status)[:\s]*(\d+)/i);
+				const structured = result.structuredContent as { exit_code?: unknown } | undefined;
+				let exitCode: number | null =
+					typeof structured?.exit_code === "number" ? structured.exit_code : 0;
+				if (textContent && structured?.exit_code === undefined) {
+					const exitMatch = textContent.match(
+						/(?:exit code|exited with code|exit status)[:\s]*(\d+)/i,
+					);
 					if (exitMatch) exitCode = Number(exitMatch[1]);
 					if (textContent.includes("command not found") || textContent.includes("No such file")) {
 						exitCode = 1;
@@ -1447,19 +1450,16 @@ export default function registerBuiltinTools(pi: BuiltinToolApi, deps?: BuiltinT
 				// Keep shell continuation lines as part of the heading, with their
 				// indentation trimmed to line up under the first command.
 				const [firstCommand = "", ...continuations] = cmd.split("\n");
+				const callStatus = getFrameStatus(ctx);
 				t.setText(
 					frameToolCall(
 						{
 							name: "bash",
-							arguments: [
-								{ value: firstCommand },
-								...(args.timeout
-									? [{ value: `(${args.timeout}s timeout)`, color: "muted" as const }]
-									: []),
-							],
+							arguments: [{ value: firstCommand }],
 							continuations: continuations.map((line) => line.replace(/^\s+/, "")),
+							details: args.timeout ? [`(${args.timeout}s timeout)`] : [],
 						},
-						getFrameStatus(ctx),
+						callStatus === "success" ? (state.finalStatus ?? callStatus) : callStatus,
 						asTheme(theme),
 						termW(),
 					),
@@ -1475,7 +1475,6 @@ export default function registerBuiltinTools(pi: BuiltinToolApi, deps?: BuiltinT
 			) {
 				resolveBaseBackground(theme);
 				const t = ctx.lastComponent ?? new TextComponent("", 0, 0);
-				const status = getFrameStatus(ctx);
 				const frameTheme = asTheme(theme);
 				const frameWidth = termW();
 				const state = ctx.state;
@@ -1512,7 +1511,27 @@ export default function registerBuiltinTools(pi: BuiltinToolApi, deps?: BuiltinT
 					else if (/aborted/.test(tail[0])) aborted = true;
 					bodyText = bodyText.slice(0, tail.index);
 				}
-				if (exitCode === null && !opt.isPartial && !ctx.isError) exitCode = 0;
+				if (exitCode === null && !opt.isPartial && !ctx.isError && !timedOut && !aborted)
+					exitCode = 0;
+
+				const status: FrameStatus = opt.isPartial
+					? getFrameStatus({ isPartial: true, isError: ctx.isError })
+					: ctx.isError || timedOut || aborted || (exitCode !== null && exitCode !== 0)
+						? "error"
+						: "success";
+				if (!opt.isPartial) {
+					// Pi renders the call header before the result. If a restored or
+					// transformed result has no isError flag, the exit code still
+					// needs to repaint that header with the failure colour.
+					const callStatus = getFrameStatus(ctx);
+					const oldCallStatus =
+						callStatus === "success" ? (state.finalStatus ?? callStatus) : callStatus;
+					state.finalStatus = status;
+					if (oldCallStatus !== status)
+						queueMicrotask(() => {
+							if (state.finalStatus === status) ctx.invalidate();
+						});
+				}
 
 				// Build the bottom-border label: `<duration> <icon> exit <N> (<lines>)`.
 				const elapsedMs =
@@ -1524,8 +1543,9 @@ export default function registerBuiltinTools(pi: BuiltinToolApi, deps?: BuiltinT
 
 				let summary = "";
 				if (!opt.isPartial) {
-					if (timedOut) summary = `${FG_YELLOW}⚡ timed out${RST}`;
-					else if (aborted) summary = `${FG_YELLOW}⚡ aborted${RST}`;
+					if (timedOut) summary = `${FG_RED}⚡ timed out${RST}`;
+					else if (aborted) summary = `${FG_RED}⚡ aborted${RST}`;
+					else if (ctx.isError && exitCode === 0) summary = `${FG_RED}✗ failed${RST}`;
 					else if (exitCode !== null) {
 						const isOk = exitCode === 0;
 						summary = `${isOk ? FG_GREEN : FG_RED}${isOk ? "✓" : "✗"} exit ${exitCode}${RST}`;
@@ -1539,7 +1559,7 @@ export default function registerBuiltinTools(pi: BuiltinToolApi, deps?: BuiltinT
 				const label = labelParts.length ? `${labelParts.join(" ")}${lineInfo}` : "";
 
 				// Render body lines (preview-truncated when collapsed).
-				const maxShow = ctx.expanded ? lineCount : MAX_PREVIEW_LINES;
+				const maxShow = lineCount;
 				const show = lines.slice(0, Math.max(0, maxShow));
 				const out: string[] = [...show];
 				if (lineCount > maxShow) {
@@ -1633,7 +1653,7 @@ export default function registerBuiltinTools(pi: BuiltinToolApi, deps?: BuiltinT
 
 				const fallback = result.content?.[0];
 				const fallbackText = fallback && isTextContent(fallback) ? fallback.text : "listed";
-				text.setText(frameResult(theme.fg("dim", fallbackText.slice(0, 120)), status, t, w));
+				text.setText(frameResult(theme.fg("dim", fallbackText), status, t, w));
 				return text;
 			},
 		});
@@ -1680,10 +1700,8 @@ export default function registerBuiltinTools(pi: BuiltinToolApi, deps?: BuiltinT
 					frameToolCall(
 						{
 							name: "find",
-							arguments: [
-								{ value: pattern },
-								...(args.path ? [{ value: `in ${sp(args.path)}`, color: "muted" as const }] : []),
-							],
+							arguments: [{ value: pattern }],
+							details: args.path ? [`in ${sp(args.path)}`] : [],
 						},
 						getFrameStatus(ctx),
 						asTheme(theme),
@@ -1720,7 +1738,7 @@ export default function registerBuiltinTools(pi: BuiltinToolApi, deps?: BuiltinT
 
 				const fallback = result.content?.[0];
 				const fallbackText = fallback && isTextContent(fallback) ? fallback.text : "found";
-				text.setText(frameResult(theme.fg("dim", fallbackText.slice(0, 120)), status, t, w));
+				text.setText(frameResult(theme.fg("dim", fallbackText), status, t, w));
 				return text;
 			},
 		});
@@ -1777,10 +1795,10 @@ export default function registerBuiltinTools(pi: BuiltinToolApi, deps?: BuiltinT
 					frameToolCall(
 						{
 							name: "grep",
-							arguments: [
-								{ value: pattern },
-								...(args.path ? [{ value: `in ${sp(args.path)}`, color: "muted" as const }] : []),
-								...(args.glob ? [{ value: `(${args.glob})`, color: "muted" as const }] : []),
+							arguments: [{ value: pattern }],
+							details: [
+								...(args.path ? [`in ${sp(args.path)}`] : []),
+								...(args.glob ? [`(${args.glob})`] : []),
 							],
 						},
 						getFrameStatus(ctx),
@@ -1810,13 +1828,13 @@ export default function registerBuiltinTools(pi: BuiltinToolApi, deps?: BuiltinT
 
 				const d = result.details;
 				if (d?._type === "grepResult" && d.text) {
-					const key = `grep:${d.pattern}:${d.matchCount}:${w}:${status}`;
+					const key = `grep:${d.pattern}:${d.matchCount}:${w}:${status}:${ctx.expanded}:${previewLineLimit("grep")}`;
 					if (ctx.state._gk !== key) {
 						ctx.state._gk = key;
 						const info = `${FG_DIM}${d.matchCount} matches${RST}`;
 						ctx.state._gt = frameResultWithBottomLabel("", info, status, t, w);
 
-						renderGrepResults(d.text, d.pattern)
+						renderGrepResults(d.text, d.pattern, ctx.expanded ? Infinity : previewLineLimit("grep"))
 							.then((rendered: string) => {
 								if (ctx.state._gk !== key) return;
 								ctx.state._gt = frameResultWithBottomLabel(rendered, info, status, t, w);
@@ -1842,7 +1860,7 @@ export default function registerBuiltinTools(pi: BuiltinToolApi, deps?: BuiltinT
 
 				const fallback = result.content?.[0];
 				const fallbackText = fallback && isTextContent(fallback) ? fallback.text : "searched";
-				text.setText(frameResult(theme.fg("dim", fallbackText.slice(0, 120)), status, t, w));
+				text.setText(frameResult(theme.fg("dim", fallbackText), status, t, w));
 				return text;
 			},
 		});
@@ -1900,6 +1918,7 @@ export default function registerBuiltinTools(pi: BuiltinToolApi, deps?: BuiltinT
 	};
 
 	const openFaceliftSettings = async (extCtx: ExtensionContext): Promise<void> => {
+		faceliftConfig = loadConfig();
 		const fields: Field[] = [
 			{
 				key: "diffLayout",
@@ -1926,11 +1945,11 @@ export default function registerBuiltinTools(pi: BuiltinToolApi, deps?: BuiltinT
 			fields,
 			onChange: (key, value) => {
 				if (key === "diffLayout") {
-					faceliftConfig = { ...faceliftConfig, diffLayout: value as DiffLayoutPreference };
+					faceliftConfig = { ...loadConfig(), diffLayout: value as DiffLayoutPreference };
 					persistFaceliftConfig(extCtx);
 				}
 				if (key === "showWorkingTime") {
-					faceliftConfig = { ...faceliftConfig, showWorkingTime: value as boolean };
+					faceliftConfig = { ...loadConfig(), showWorkingTime: value as boolean };
 					persistFaceliftConfig(extCtx);
 				}
 			},
@@ -1938,6 +1957,7 @@ export default function registerBuiltinTools(pi: BuiltinToolApi, deps?: BuiltinT
 	};
 
 	const showFaceliftStatus = (extCtx: ExtensionContext): void => {
+		faceliftConfig = loadConfig();
 		const lines = [
 			`config:     ${getFaceliftConfigPath()}`,
 			`diffLayout: ${faceliftConfig.diffLayout}`,
@@ -1947,7 +1967,7 @@ export default function registerBuiltinTools(pi: BuiltinToolApi, deps?: BuiltinT
 	};
 
 	const resetFaceliftConfig = (extCtx: ExtensionContext): void => {
-		faceliftConfig = faceliftEnvDefaults();
+		faceliftConfig = faceliftDefaults();
 		persistFaceliftConfig(extCtx);
 		extCtx.ui.notify("Tool visuals reset to defaults.", "info");
 	};
@@ -2186,7 +2206,7 @@ export default function registerBuiltinTools(pi: BuiltinToolApi, deps?: BuiltinT
 
 				const fallback = result.content?.[0];
 				const fallbackText = fallback && isTextContent(fallback) ? fallback.text : "written";
-				text.setText(frameResult(theme.fg("dim", fallbackText.slice(0, 120)), status, t, w));
+				text.setText(frameResult(theme.fg("dim", fallbackText), status, t, w));
 				return text;
 			},
 		});
@@ -2348,7 +2368,7 @@ export default function registerBuiltinTools(pi: BuiltinToolApi, deps?: BuiltinT
 				if (d?._type !== "editDiff") {
 					const fallback = result.content?.[0];
 					const fallbackText = fallback && isTextContent(fallback) ? fallback.text : "edited";
-					text.setText(frameResult(theme.fg("dim", fallbackText.slice(0, 120)), status, t, w));
+					text.setText(frameResult(theme.fg("dim", fallbackText), status, t, w));
 					return text;
 				}
 

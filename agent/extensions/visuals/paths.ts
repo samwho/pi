@@ -4,10 +4,8 @@
  * State lives under `~/.pi/agent/visuals/` (or
  * `${PI_AGENT_DIR}/visuals/` if the env var is set):
  *
- *   - `config.json` — user-editable settings (see config.ts). Today
- *     this is just the `diffLayout` preference; more knobs (themes,
- *     icon mode, max preview lines, etc.) can be added later without
- *     changing the directory layout.
+ *   - `config.json` — user-editable settings (see config.ts), including
+ *     per-tool preview limits, themes, icon mode, and diff preferences.
  *
  * The directory is created lazily on first write — `ensureFaceliftDir`
  * is the canonical entry point. We never call `mkdirSync` from module

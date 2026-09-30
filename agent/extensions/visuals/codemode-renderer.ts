@@ -13,6 +13,7 @@ import {
 	type Component,
 } from "@earendil-works/pi-tui";
 import { format } from "prettier";
+import { previewLineLimit } from "./config.ts";
 import { detectedCodeLanguage } from "./shared/code-language.ts";
 import { DynamicText } from "./shared/dynamic-text.ts";
 import {
@@ -29,11 +30,7 @@ import {
 } from "./shared/tool-renderer-patch.ts";
 import { frameToolCall } from "./shared/tool-heading.ts";
 
-const NESTED_OUTPUT_PREVIEW_LINES = 8;
-const NESTED_OUTPUT_EXPANDED_LINES = 120;
 const NESTED_OUTPUT_MAX_CHARS = 8000;
-const OUTPUT_PREVIEW_LINES = 6;
-const EXPANDED_OUTPUT_LINES = 300;
 const SCRIPT_HEADER = /^Script (?:completed|failed)\nWall time [\d.]+ seconds\nOutput:\n$/;
 const GROUP_INDENT = 1;
 
@@ -223,13 +220,7 @@ function toolBox(
 		const language =
 			(filePath && getLanguageFromPath(filePath)) || detectedCodeLanguage(output.text, invalidate);
 		const lines = output.text ? highlightLines(output.text, language) : [];
-		body.push(
-			...preview(
-				lines,
-				expanded ? NESTED_OUTPUT_EXPANDED_LINES : NESTED_OUTPUT_PREVIEW_LINES,
-				theme,
-			),
-		);
+		body.push(...preview(lines, expanded ? Infinity : previewLineLimit(call.name ?? ""), theme));
 		if (output.images)
 			body.push(theme.fg("muted", `[${output.images} image${output.images === 1 ? "" : "s"}]`));
 		if (output.truncated) body.push(theme.fg("muted", "… nested output capped for display"));
@@ -308,17 +299,19 @@ function nestedCallLines(
 		}
 	}
 	// Historical nested results only retain a short args preview and status.
+	const fallbackText = output?.content
+		.filter((block) => block.type === "text")
+		.map((block) => block.text ?? "")
+		.join("\n");
 	return toolBox(
 		call,
 		output
 			? {
-					text: output.content
-						.filter((block) => block.type === "text")
-						.map((block) => block.text ?? "")
-						.join("\n")
-						.slice(0, NESTED_OUTPUT_MAX_CHARS),
+					text: expanded
+						? (fallbackText ?? "")
+						: (fallbackText ?? "").slice(0, NESTED_OUTPUT_MAX_CHARS),
 					images: output.content.filter((block) => block.type === "image").length,
-					truncated: false,
+					truncated: !expanded && (fallbackText?.length ?? 0) > NESTED_OUTPUT_MAX_CHARS,
 				}
 			: undefined,
 		theme,
@@ -409,9 +402,7 @@ function renderResult(
 			// Pi's result contains text() output (and any returned value), not
 			// just nested tool results. Keep it visible after the tool boxes.
 			const output = outputLines(result, theme, failed);
-			body.push(
-				...preview(output, options.expanded ? EXPANDED_OUTPUT_LINES : OUTPUT_PREVIEW_LINES, theme),
-			);
+			body.push(...output);
 			if (details.fullOutputPath && !options.expanded)
 				body.push(theme.fg("muted", `Full output: ${details.fullOutputPath}`));
 		}

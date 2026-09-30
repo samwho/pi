@@ -33,17 +33,37 @@ describe("tool heading", () => {
 		const lines = frameToolCall(
 			{
 				name: "bash",
-				arguments: [{ value: "echo first" }, { value: "(5s timeout)", color: "muted" }],
+				arguments: [{ value: "echo first" }],
 				continuations: ["echo second", "echo third"],
+				details: ["(5s timeout)"],
 			},
 			"pending",
 			theme,
 			48,
 		).split("\n");
-		expect(lines).toHaveLength(3);
-		expect(lines[0]).toContain("bash echo first (5s timeout)");
+		expect(lines).toHaveLength(4);
+		expect(lines[0]).toContain("bash echo first");
+		expect(lines[0]).not.toContain("timeout");
 		expect(lines[1]).toContain("│ echo second");
-		expect(lines[2]).toContain("╰ echo third");
+		expect(lines[2]).toContain("│ echo third");
+		expect(lines[3]).toContain("╰ (5s timeout)");
+		for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(48);
+	});
+
+	it("keeps a read range visible when a long path is truncated", () => {
+		const lines = frameToolCall(
+			{
+				name: "read",
+				arguments: [{ value: `/some/${"long/".repeat(15)}file.ts` }],
+				details: ["from line 120 (50 lines)"],
+			},
+			"success",
+			theme,
+			48,
+		).split("\n");
+		expect(lines).toHaveLength(2);
+		expect(lines[0]).not.toContain("from line");
+		expect(lines[1]).toContain("from line 120 (50 lines)");
 		for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(48);
 	});
 });

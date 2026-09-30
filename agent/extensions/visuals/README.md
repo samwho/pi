@@ -2,6 +2,14 @@
 
 One local Pi extension for tool frames, syntax highlighting, diffs, codemode, web search, the header, footer, and working-time display. Run `/visuals` to change the diff layout or timer setting. Config lives in `~/.pi/agent/visuals/config.json`; on first load, the old `wierd-facelift` config is copied over if present.
 
+Collapsed result bodies show 40 rows by default, except `read` and `grep`, which show 10. Override any tool by name in `previewLines`:
+
+```json
+"previewLines": { "default": 40, "read": 10, "grep": 10, "bash": 20 }
+```
+
+Ctrl+O expands results without the preview limit. The same config also holds `highlight` (Shiki theme, maximum characters, cache size), `diff` (theme, preset, colour overrides, split widths, cache size), `icons`, `imageProtocol`, `quoteUrl`, `diffLayout`, and `showWorkingTime`. Change the file and run `/reload` for theme, diff, icon, or timer changes; preview limits are picked up by the next result. Visual preferences no longer read `FACELIFT_*`, `DIFF_*`, or `PI_QUOTES_URL` environment variables. Pi's `PI_AGENT_DIR` and terminal-identification variables still control where settings live and which image protocol works.
+
 ## Where to change things
 
 - `common/tool-frame/index.ts` owns the corners, rails, rules, widths, and status colours for every tool box. Change a border there.
@@ -15,6 +23,6 @@ Run `npm run check` from `agent/extensions/` for formatting, type-aware lint, ty
 
 ## Rendering performance
 
-Run `npm run bench:render` from `agent/extensions/` to compare repeated redraws with explicit invalidations. It uses synthetic 160-column results (an 80-line highlighted read, a 40-line script, 60 search links, and 80 JSON items), so it doesn't measure the terminal or model latency. Shiki is warmed before the timings start. To collect a Node CPU profile of the benchmark worker, run `NODE_OPTIONS='--cpu-prof --cpu-prof-dir=/tmp' npm run bench:render`.
+Run `npm run bench:render` from `agent/extensions/` to compare repeated redraws with explicit invalidations. It uses synthetic 160-column results (an 80-line read shown in its 10-row collapsed preview, a 40-line script, 60 search links, and 80 JSON items), so it doesn't measure the terminal or model latency. Shiki is warmed before the timings start. To collect a Node CPU profile of the benchmark worker, run `NODE_OPTIONS='--cpu-prof --cpu-prof-dir=/tmp' npm run bench:render`.
 
-In the initial profile, rendering an unchanged nested read called `setExpanded(false)` every time, rebuilding its 80-line result (~0.6 ms); truncating all its ANSI rows again for the grouping rail added ~2.8 ms. Guarding the expansion change and clipping the single padding column brings the grouped redraw to ~0.1 ms on the same machine. Completed web searches, script input, and generic highlighted output now cache their lines between invalidations; partial search results still redraw the spinner. These are local benchmark figures, not a promise about whole-screen frame times.
+In the initial profile, rendering an unchanged nested read called `setExpanded(false)` every time, rebuilding its 80-line result (~0.6 ms); truncating all its ANSI rows again for the grouping rail added ~2.8 ms. Guarding the expansion change and clipping the single padding column brought the grouped redraw to ~0.1 ms in the original benchmark; a later run with the new preview limits measured ~0.4 ms for that grouped path and ~0.09 ms for the read preview. Completed web searches, script input, and generic highlighted output cache their lines between invalidations; partial search results still redraw the spinner. These are local benchmark figures, not a promise about whole-screen frame times.

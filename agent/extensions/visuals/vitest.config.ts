@@ -16,7 +16,7 @@ const testAgentDir = mkdtempSync(join(tmpdir(), "pi-visuals-tests-"));
 process.on("exit", () => rmSync(testAgentDir, { recursive: true, force: true }));
 
 export default defineConfig({
-	test: { env: { PI_AGENT_DIR: testAgentDir, FACELIFT_THEME: "github-dark" } },
+	test: { env: { PI_AGENT_DIR: testAgentDir } },
 	resolve: {
 		alias: Object.fromEntries(
 			["pi-ai", "pi-coding-agent", "pi-tui"].map((name) => [

@@ -32,8 +32,8 @@
  * column for the left rail).
  */
 
-import { existsSync, readFileSync } from "node:fs";
 import { extname } from "node:path";
+import { loadConfig } from "../../config.ts";
 
 import { codeToANSI } from "@shikijs/cli";
 import * as Diff from "diff";
@@ -198,12 +198,13 @@ const DIFF_PRESETS: Record<string, DiffPreset> = {
 	},
 };
 
-const SPLIT_MIN_WIDTH = envInt("DIFF_SPLIT_MIN_WIDTH", 150);
-const SPLIT_MIN_CODE_WIDTH = envInt("DIFF_SPLIT_MIN_CODE_WIDTH", 60);
+const diffConfig = loadConfig().diff;
+const SPLIT_MIN_WIDTH = diffConfig.splitMinWidth;
+const SPLIT_MIN_CODE_WIDTH = diffConfig.splitMinCodeWidth;
 const SPLIT_MAX_WRAP_RATIO = 0.2;
 const SPLIT_MAX_WRAP_LINES = 8;
-const MAX_HL_CHARS = envInt("DIFF_MAX_HL_CHARS", 80_000);
-const CACHE_LIMIT = envInt("DIFF_CACHE_LIMIT", 192);
+const MAX_HL_CHARS = diffConfig.maxChars;
+const CACHE_LIMIT = diffConfig.cacheLimit;
 const WORD_DIFF_MIN_SIM = 0.15;
 const MAX_WRAP_ROWS_WIDE = 3;
 const MAX_WRAP_ROWS_MED = 2;
@@ -240,21 +241,21 @@ const RST = "\x1b[0m";
 const BOLD = "\x1b[1m";
 const DIM = "\x1b[2m";
 
-let BG_ADD = envBg("DIFF_BG_ADD", "\x1b[48;2;22;38;32m");
-let BG_DEL = envBg("DIFF_BG_DEL", "\x1b[48;2;45;25;25m");
-let BG_ADD_W = envBg("DIFF_BG_ADD_HL", "\x1b[48;2;35;75;50m");
-let BG_DEL_W = envBg("DIFF_BG_DEL_HL", "\x1b[48;2;80;35;35m");
-let BG_GUTTER_ADD = envBg("DIFF_BG_GUTTER_ADD", "\x1b[48;2;18;32;26m");
-let BG_GUTTER_DEL = envBg("DIFF_BG_GUTTER_DEL", "\x1b[48;2;38;22;22m");
+let BG_ADD = "\x1b[48;2;22;38;32m";
+let BG_DEL = "\x1b[48;2;45;25;25m";
+let BG_ADD_W = "\x1b[48;2;35;75;50m";
+let BG_DEL_W = "\x1b[48;2;80;35;35m";
+let BG_GUTTER_ADD = "\x1b[48;2;18;32;26m";
+let BG_GUTTER_DEL = "\x1b[48;2;38;22;22m";
 // Fallback for BG_EMPTY when the host theme doesn't expose a
 // `userMessageBg` we can pull. Kept as a module-level constant so theme
 // changes can reset BG_EMPTY back to a known default before the next
 // auto-derive pass runs.
 const BG_EMPTY_FALLBACK = "\x1b[48;2;18;18;18m";
-let BG_EMPTY = envBg("DIFF_BG_EMPTY", BG_EMPTY_FALLBACK);
+let BG_EMPTY = BG_EMPTY_FALLBACK;
 
-let FG_ADD = envFg("DIFF_FG_ADD", "\x1b[38;2;100;180;120m");
-let FG_DEL = envFg("DIFF_FG_DEL", "\x1b[38;2;200;100;100m");
+let FG_ADD = "\x1b[38;2;100;180;120m";
+let FG_DEL = "\x1b[38;2;200;100;100m";
 let FG_DIM = "\x1b[38;2;80;80;80m";
 let FG_LNUM = "\x1b[38;2;100;100;100m";
 let FG_RULE = "\x1b[38;2;50;50;50m";
@@ -278,7 +279,7 @@ const ANSI_RE = new RegExp(`${ESC_RE}\\[[0-9;]*m`, "g");
 const ANSI_CAPTURE_RE = new RegExp(`${ESC_RE}\\[([^m]*)m`, "g");
 const ANSI_PARAM_CAPTURE_RE = new RegExp(`${ESC_RE}\\[([0-9;]*)m`, "g");
 
-let THEME: string = process.env.DIFF_THEME ?? "github-dark";
+let THEME: string = diffConfig.theme;
 let paletteApplied = false;
 
 let _autoDerivePending = true;
@@ -286,25 +287,8 @@ let _hasExplicitBgConfig = false;
 let _lastResolvedThemeKey = "";
 
 // ---------------------------------------------------------------------------
-// Env / config helpers
+// Palette helpers
 // ---------------------------------------------------------------------------
-
-function envInt(name: string, fallback: number): number {
-	const value = Number.parseInt(process.env[name] ?? "", 10);
-	return Number.isFinite(value) && value > 0 ? value : fallback;
-}
-
-function envFg(name: string, fallback: string): string {
-	const hex = process.env[name];
-	if (!hex || !/^#[0-9a-fA-F]{6}$/.test(hex)) return fallback;
-	return hexToFgAnsi(hex) || fallback;
-}
-
-function envBg(name: string, fallback: string): string {
-	const hex = process.env[name];
-	if (!hex || !/^#[0-9a-fA-F]{6}$/.test(hex)) return fallback;
-	return hexToBgAnsi(hex) || fallback;
-}
 
 function parseAnsiRgb(ansi: string): { r: number; g: number; b: number } | null {
 	const match = ansi.match(new RegExp(`${ESC_RE}\\[(?:38|48);2;(\\d+);(\\d+);(\\d+)m`));
@@ -400,55 +384,22 @@ function autoDeriveBgFromTheme(theme: DiffThemeLike): void {
 	}
 }
 
-interface DiffConfig {
-	diffTheme?: keyof typeof DIFF_PRESETS;
-	diffColors?: Record<string, string>;
-}
-
-function loadDiffConfig(): DiffConfig {
-	const paths = [
-		`${process.cwd()}/.pi/settings.json`,
-		`${process.env.HOME ?? ""}/.pi/settings.json`,
-	];
-	for (const path of paths) {
-		try {
-			if (existsSync(path)) {
-				const raw = JSON.parse(readFileSync(path, "utf-8")) as DiffConfig;
-				if (raw.diffTheme || raw.diffColors) {
-					return { diffTheme: raw.diffTheme, diffColors: raw.diffColors };
-				}
-			}
-		} catch {
-			/* skip invalid files */
-		}
-	}
-	return {};
-}
-
-/**
- * Apply the diff palette from `.pi/settings.json` (project then global)
- * → named preset → defaults. Idempotent — safe to call from multiple
- * extensions. Should be called once at extension boot, before the first
- * render.
- */
+/** Apply the palette from visuals/config.json. Call once before the first render. */
 export function applyDiffPalette(): void {
 	if (paletteApplied) return;
 	paletteApplied = true;
 
-	const config = loadDiffConfig();
-	const preset = config.diffTheme ? DIFF_PRESETS[config.diffTheme] : null;
+	const preset = diffConfig.preset === "default" ? null : DIFF_PRESETS[diffConfig.preset];
 	if (preset) _hasExplicitBgConfig = true;
 
-	const overrides = config.diffColors ?? {};
+	const overrides = diffConfig.colors;
 	if (Object.keys(overrides).length > 0) _hasExplicitBgConfig = true;
 
 	const applyBg = (
-		envName: string | null,
 		key: string,
 		presetValue: string | undefined,
 		set: (ansi: string) => void,
 	): void => {
-		if (envName && process.env[envName]) return;
 		const hex = overrides[key] ?? presetValue;
 		if (hex) {
 			const ansi = hexToBgAnsi(hex);
@@ -457,12 +408,10 @@ export function applyDiffPalette(): void {
 	};
 
 	const applyFg = (
-		envName: string | null,
 		key: string,
 		presetValue: string | undefined,
 		set: (ansi: string) => void,
 	): void => {
-		if (envName && process.env[envName]) return;
 		const hex = overrides[key] ?? presetValue;
 		if (hex) {
 			const ansi = hexToFgAnsi(hex);
@@ -470,52 +419,55 @@ export function applyDiffPalette(): void {
 		}
 	};
 
-	applyBg("DIFF_BG_ADD", "bgAdd", preset?.bgAdd, (v) => {
+	applyBg("bgAdd", preset?.bgAdd, (v) => {
 		BG_ADD = v;
 	});
-	applyBg("DIFF_BG_DEL", "bgDel", preset?.bgDel, (v) => {
+	applyBg("bgDel", preset?.bgDel, (v) => {
 		BG_DEL = v;
 	});
-	applyBg("DIFF_BG_ADD_HL", "bgAddHighlight", preset?.bgAddHighlight, (v) => {
+	applyBg("bgAddHighlight", preset?.bgAddHighlight, (v) => {
 		BG_ADD_W = v;
 	});
-	applyBg("DIFF_BG_DEL_HL", "bgDelHighlight", preset?.bgDelHighlight, (v) => {
+	applyBg("bgDelHighlight", preset?.bgDelHighlight, (v) => {
 		BG_DEL_W = v;
 	});
-	applyBg("DIFF_BG_GUTTER_ADD", "bgGutterAdd", preset?.bgGutterAdd, (v) => {
+	applyBg("bgGutterAdd", preset?.bgGutterAdd, (v) => {
 		BG_GUTTER_ADD = v;
 	});
-	applyBg("DIFF_BG_GUTTER_DEL", "bgGutterDel", preset?.bgGutterDel, (v) => {
+	applyBg("bgGutterDel", preset?.bgGutterDel, (v) => {
 		BG_GUTTER_DEL = v;
 	});
-	applyBg("DIFF_BG_EMPTY", "bgEmpty", preset?.bgEmpty, (v) => {
+	applyBg("bgEmpty", preset?.bgEmpty, (v) => {
 		BG_EMPTY = v;
 	});
 
-	applyFg("DIFF_FG_ADD", "fgAdd", preset?.fgAdd, (v) => {
+	applyFg("fgAdd", preset?.fgAdd, (v) => {
 		FG_ADD = v;
 	});
-	applyFg("DIFF_FG_DEL", "fgDel", preset?.fgDel, (v) => {
+	applyFg("fgDel", preset?.fgDel, (v) => {
 		FG_DEL = v;
 	});
-	applyFg(null, "fgDim", preset?.fgDim, (v) => {
+	applyFg("fgDim", preset?.fgDim, (v) => {
 		FG_DIM = v;
 	});
-	applyFg(null, "fgLnum", preset?.fgLnum, (v) => {
+	applyFg("fgLnum", preset?.fgLnum, (v) => {
 		FG_LNUM = v;
 	});
-	applyFg(null, "fgRule", preset?.fgRule, (v) => {
+	applyFg("fgRule", preset?.fgRule, (v) => {
 		FG_RULE = v;
 	});
-	applyFg(null, "fgStripe", preset?.fgStripe, (v) => {
+	applyFg("fgStripe", preset?.fgStripe, (v) => {
 		FG_STRIPE = v;
 	});
-	applyFg(null, "fgSafeMuted", preset?.fgSafeMuted, (v) => {
+	applyFg("fgSafeMuted", preset?.fgSafeMuted, (v) => {
 		FG_SAFE_MUTED = v;
 	});
 
-	const shiki = overrides.shikiTheme ?? preset?.shikiTheme;
-	if (shiki) THEME = shiki;
+	// Explicit Shiki themes override a preset; the default follows its palette.
+	THEME =
+		diffConfig.theme !== "github-dark"
+			? diffConfig.theme
+			: (preset?.shikiTheme ?? diffConfig.theme);
 
 	DIVIDER = `${FG_RULE}│${RST}`;
 	DEFAULT_DIFF_COLORS = { fgAdd: FG_ADD, fgDel: FG_DEL, fgCtx: FG_DIM };

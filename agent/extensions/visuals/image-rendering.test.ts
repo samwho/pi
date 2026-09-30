@@ -16,7 +16,6 @@ const ENV_KEYS = [
 	"WEZTERM_CONFIG_DIR",
 	"WEZTERM_CONFIG_FILE",
 	"COLORTERM",
-	"FACELIFT_IMAGE_PROTOCOL",
 ] as const;
 
 class MockText {

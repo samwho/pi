@@ -14,18 +14,6 @@ import { frameToolCall } from "./shared/tool-heading.ts";
 /** Give pi-web-search framed tool output without replacing its tools. */
 
 const WEB_TOOLS = new Set(["web_search"]);
-const DEFAULT_COLLAPSED_OUTPUT_LINES = 6;
-const EXPANDED_OUTPUT_LINES = 180;
-
-/** Keep the search preview consistent with the facelift configuration.
- * Invalid or absent values retain the previous compact default. */
-function collapsedOutputLines(): number {
-	const configured = Number.parseInt(process.env.FACELIFT_MAX_PREVIEW_LINES ?? "", 10);
-	return Number.isSafeInteger(configured) && configured > 0
-		? configured
-		: DEFAULT_COLLAPSED_OUTPUT_LINES;
-}
-
 type Status = FrameStatus;
 type RecordValue = Record<string, unknown>;
 type ToolResult = { content?: Array<{ type?: string; text?: string }>; details?: unknown };
@@ -171,7 +159,6 @@ export function renderResultFor(
 		}
 		const error = text(details.error);
 		const raw = outputMarkdown(result);
-		const limit = options.expanded ? EXPANDED_OUTPUT_LINES : collapsedOutputLines();
 		const lines = failed
 			? [
 					error ? theme.fg("error", `✗ ${error}`) : theme.fg("error", "✗ failed"),
@@ -181,11 +168,8 @@ export function renderResultFor(
 					theme.fg("success", `✓ ${resultSummary(details)}`),
 					...renderMarkdown(raw, Math.max(1, width - 2)),
 				];
-		const shown = lines.slice(0, limit);
-		if (lines.length > limit)
-			shown.push(theme.fg("muted", `… ${lines.length - limit} more lines · Ctrl+O to expand`));
 		return [
-			...shown.flatMap((line) => bodyLines(theme, s, line, width)),
+			...lines.flatMap((line) => bodyLines(theme, s, line, width)),
 			bottom(theme, s, bottomLabel(failed ? "failed" : "complete", duration), width),
 		].join("\n");
 	}, !options.isPartial);

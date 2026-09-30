@@ -1,10 +1,12 @@
 import { homedir } from "node:os";
+import { lstat, open } from "node:fs/promises";
+import { join } from "node:path";
 import { FAST_COST_MULTIPLIER } from "../fast-mode.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 type StatusColor = "success" | "warning" | "error";
-type GitDelta = { additions: number; deletions: number; untracked: number };
+type GitDelta = { additions: number; deletions: number };
 
 // Rates in Pi's model catalogue are USD per million tokens. The highest of
 // input/output is used so an expensive output price is not hidden by cheap input.
@@ -99,6 +101,47 @@ function parseNumstat(output: string): Pick<GitDelta, "additions" | "deletions">
 	return { additions, deletions };
 }
 
+// Match Git's numstat convention: empty and binary files add no text lines;
+// a non-empty last line counts even without a trailing newline.
+async function countNewFileLines(path: string): Promise<number> {
+	try {
+		const stat = await lstat(path);
+		if (stat.isSymbolicLink()) return 1;
+		if (!stat.isFile()) return 0;
+
+		const file = await open(path, "r");
+		try {
+			const buffer = Buffer.allocUnsafe(64 * 1024);
+			let bytes = 0;
+			let lines = 0;
+			let endsInNewline = false;
+			while (true) {
+				const { bytesRead } = await file.read(buffer, 0, buffer.length, null);
+				if (!bytesRead) break;
+				if (bytes < 8_000 && buffer.subarray(0, Math.min(bytesRead, 8_000 - bytes)).includes(0))
+					return 0;
+				for (let i = 0; i < bytesRead; i++) if (buffer[i] === 10) lines++;
+				endsInNewline = buffer[bytesRead - 1] === 10;
+				bytes += bytesRead;
+			}
+			return lines + (bytes > 0 && !endsInNewline ? 1 : 0);
+		} finally {
+			await file.close();
+		}
+	} catch {
+		// A file may disappear between Git listing it and us opening it.
+		return 0;
+	}
+}
+
+export async function countUntrackedLines(cwd: string, output: string): Promise<number> {
+	let additions = 0;
+	for (const path of output.split("\0")) {
+		if (path) additions += await countNewFileLines(join(cwd, path));
+	}
+	return additions;
+}
+
 function modelLabel(provider: string | undefined, id: string | undefined): string {
 	if (!id) return "no model";
 	return provider?.startsWith("openai") ? id.replace(/^gpt-\d+(?:\.\d+)*-/, "") : id;
@@ -111,13 +154,18 @@ export default function (pi: ExtensionAPI) {
 
 	async function refreshGitDelta(ctx: ExtensionContext): Promise<void> {
 		const version = ++gitRefreshVersion;
-		const status = await pi.exec("git", ["status", "--porcelain=v1", "--untracked-files=normal"], {
-			cwd: ctx.cwd,
-			timeout: 5000,
-		});
+		// The :/ pathspec includes the whole repo even when Pi starts in a subdirectory.
+		const untracked = await pi.exec(
+			"git",
+			["ls-files", "--others", "--exclude-standard", "-z", "--", ":/"],
+			{
+				cwd: ctx.cwd,
+				timeout: 5000,
+			},
+		);
 
 		if (version !== gitRefreshVersion) return;
-		if (status.code !== 0) {
+		if (untracked.code !== 0) {
 			gitDelta = null;
 			requestFooterRender?.();
 			return;
@@ -135,10 +183,9 @@ export default function (pi: ExtensionAPI) {
 
 		if (version !== gitRefreshVersion) return;
 		const delta = diff.code === 0 ? parseNumstat(diff.stdout) : { additions: 0, deletions: 0 };
-		gitDelta = {
-			...delta,
-			untracked: status.stdout.split("\n").filter((line) => line.startsWith("?? ")).length,
-		};
+		const untrackedLines = await countUntrackedLines(ctx.cwd, untracked.stdout);
+		if (version !== gitRefreshVersion) return;
+		gitDelta = { additions: delta.additions + untrackedLines, deletions: delta.deletions };
 		requestFooterRender?.();
 	}
 
@@ -165,7 +212,6 @@ export default function (pi: ExtensionAPI) {
 						? [
 								theme.fg(gitDelta.additions ? "success" : "dim", `+${gitDelta.additions}`),
 								theme.fg(gitDelta.deletions ? "error" : "dim", `-${gitDelta.deletions}`),
-								gitDelta.untracked ? theme.fg("warning", `?${gitDelta.untracked}`) : "",
 							]
 								.filter(Boolean)
 								.join(" ")

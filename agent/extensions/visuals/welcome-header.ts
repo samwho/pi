@@ -8,6 +8,7 @@ import {
 	type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { hyperlink, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { loadConfig } from "./config.ts";
 
 type JsonObject = Record<string, unknown>;
 type ResourceCounts = {
@@ -22,7 +23,6 @@ type Quote = {
 };
 
 const EXTENSION_SUFFIXES = new Set([".cjs", ".js", ".mjs", ".ts", ".tsx"]);
-const QUOTE_ENDPOINT = process.env.PI_QUOTES_URL ?? "https://quotes.samwho.dev/random";
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const SPINNER_INTERVAL_MS = 120;
 
@@ -39,7 +39,7 @@ function parseQuote(value: unknown): Quote | undefined {
 
 async function fetchQuote(): Promise<Quote | undefined> {
 	try {
-		const response = await fetch(QUOTE_ENDPOINT, {
+		const response = await fetch(loadConfig().quoteUrl, {
 			headers: { Accept: "application/json" },
 			signal: AbortSignal.timeout(3_000),
 		});

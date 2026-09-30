@@ -125,6 +125,8 @@ describe("resolveBundledTheme: alias resolution", () => {
 	});
 
 	it("aliases gruvbox/material/solarized/one-dark families to canonical variants", () => {
+		expect(resolveBundledTheme("dark")).toBe("github-dark");
+		expect(resolveBundledTheme("light")).toBe("github-light");
 		expect(resolveBundledTheme("gruvbox-dark")).toBe("gruvbox-dark-medium");
 		expect(resolveBundledTheme("gruvbox-light")).toBe("gruvbox-light-medium");
 		expect(resolveBundledTheme("material")).toBe("material-theme");
@@ -152,8 +154,8 @@ describe("resolveBundledTheme: invalid theme warning", () => {
 		expect(msg).toContain("visuals");
 		expect(msg).toContain("not-a-real-theme-9000");
 		expect(msg).toContain(DEFAULT_THEME);
-		// The warning should advertise FACELIFT_THEME as the fix knob.
-		expect(msg).toContain("FACELIFT_THEME");
+		// The warning should point to the visual config knob.
+		expect(msg).toContain("highlight.theme in visuals/config.json");
 	});
 
 	it("warns at most once per distinct invalid theme (no per-render spam)", () => {

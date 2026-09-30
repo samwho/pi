@@ -1,5 +1,7 @@
 import { ToolExecutionComponent, type Theme } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
+import { limitResultPreview } from "./result-preview.ts";
+import { previewLineLimit } from "../config.ts";
 
 /** The public portion of Pi's renderer context used by local decorations. */
 export type ToolRenderContext = {
@@ -38,7 +40,11 @@ type ResultDecorator = (
 	context: ToolRenderContext,
 ) => ToolResult;
 type ToolExecutionPrototype = Record<string | symbol, unknown>;
-type InternalToolExecution = { toolName?: unknown };
+type InternalToolExecution = {
+	toolName?: unknown;
+	expanded?: boolean;
+	getTextOutput?: () => string;
+};
 
 type RegisteredRenderer = {
 	renderCall: CallRenderer;
@@ -48,6 +54,7 @@ type PatchState = {
 	originalCallRenderer: (...args: unknown[]) => unknown;
 	originalResultRenderer: (...args: unknown[]) => unknown;
 	originalRenderShell: (...args: unknown[]) => unknown;
+	originalFormatToolExecution?: (this: InternalToolExecution) => string;
 	renderers: Map<string, RegisteredRenderer>;
 	decorators: Map<string, ResultDecorator>;
 };
@@ -97,6 +104,10 @@ export function registerToolRenderer(
 			originalCallRenderer: originalCallRenderer as (...args: unknown[]) => unknown,
 			originalResultRenderer: originalResultRenderer as (...args: unknown[]) => unknown,
 			originalRenderShell: originalRenderShell as (...args: unknown[]) => unknown,
+			originalFormatToolExecution:
+				typeof prototype.formatToolExecution === "function"
+					? (prototype.formatToolExecution as PatchState["originalFormatToolExecution"])
+					: undefined,
 			renderers: new Map(),
 			decorators: new Map(),
 		};
@@ -107,6 +118,21 @@ export function registerToolRenderer(
 	// helper gains new capabilities. Refresh every dispatcher so wildcard
 	// renderers and decorators also work without restarting Pi.
 	state.decorators ??= new Map();
+	state.originalFormatToolExecution ??=
+		typeof prototype.formatToolExecution === "function"
+			? (prototype.formatToolExecution as PatchState["originalFormatToolExecution"])
+			: undefined;
+	if (state.originalFormatToolExecution) {
+		prototype.formatToolExecution = function (this: InternalToolExecution): string {
+			const formatted = state.originalFormatToolExecution!.call(this);
+			const output = this.getTextOutput?.();
+			if (this.expanded || !output || !formatted.endsWith(output)) return formatted;
+			const lines = output.split("\n");
+			const limit = previewLineLimit(String(this.toolName));
+			if (lines.length <= limit) return formatted;
+			return `${formatted.slice(0, -output.length)}${lines.slice(0, limit - 1).join("\n")}\n… ${lines.length - limit + 1} more lines · Ctrl+O to expand`;
+		};
+	}
 	prototype.getRenderShell = function (this: InternalToolExecution): unknown {
 		return registeredRendererFor(state, String(this.toolName))
 			? "self"
@@ -131,20 +157,25 @@ export function registerToolRenderer(
 					context: ToolRenderContext,
 				) => registered.renderResult(toolName, result, options, theme, context)
 			: state.originalResultRenderer.call(this);
+		if (typeof resultRenderer !== "function") return resultRenderer;
 		const decorator = state.decorators.get(toolName);
-		if (!decorator || typeof resultRenderer !== "function") return resultRenderer;
 		return (
 			result: ToolResult,
 			options: { expanded: boolean; isPartial: boolean },
 			theme: Theme,
 			context: ToolRenderContext,
-		) =>
-			(resultRenderer as (...args: unknown[]) => unknown)(
-				decorator(toolName, result, options, theme, context),
+		) => {
+			const decorated = decorator ? decorator(toolName, result, options, theme, context) : result;
+			const component = (resultRenderer as (...args: unknown[]) => Component | undefined)(
+				decorated,
 				options,
 				theme,
 				context,
 			);
+			return component
+				? limitResultPreview(component, toolName, options.expanded, theme, context)
+				: component;
+		};
 	};
 	for (const toolName of toolNames) state.renderers.set(toolName, renderer);
 }

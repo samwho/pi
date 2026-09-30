@@ -1,168 +1,128 @@
-/**
- * Persistent config for local tool visuals.
- *
- * Stored at `<piAgentDir>/visuals/config.json`. Pattern mirrors
- * `packages/voice/config.ts` and `packages/web/config.ts`:
- *
- *   - First-run load: file missing ⇒ seed from env, write to disk.
- *   - Subsequent loads: read JSON, `sanitize()` unknown fields back to
- *     defaults so a hand-edited file with typos doesn't crash the
- *     extension.
- *   - Saves write atomically (one JSON.stringify + trailing newline).
- *
- * The knobs we expose today are `diffLayout` and `showWorkingTime`, and
- * the schema is designed to accept more fields (icon mode, max preview
- * lines, etc.) without breaking older config files.
- */
-
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-
 import { configPath as defaultConfigPath, ensureFaceliftDir, legacyConfigPath } from "./paths.ts";
 
-/**
- * User-facing layout preference for the write/edit diff renderer.
- *
- * Mirrors `DiffLayoutPreference` from `@wierdbytes/pi-common/diff`. We
- * re-declare it here so the config module has no runtime dependency on
- * the diff package — the two values are kept in sync by the
- * `decideDiffLayout` helper in `index.ts`.
- */
 export const VALID_DIFF_LAYOUTS = ["consistent", "split", "unified", "per-edit"] as const;
 export type DiffLayoutPreference = (typeof VALID_DIFF_LAYOUTS)[number];
-export const DEFAULT_DIFF_LAYOUT: DiffLayoutPreference = "consistent";
+export type ImageProtocolPreference = "auto" | "kitty" | "iterm2" | "none";
 
+/** All visual preferences live in `<piAgentDir>/visuals/config.json`. */
 export interface WierdFaceliftConfig {
-	/**
-	 * How to pick split-vs-unified for write/edit diffs:
-	 *
-	 *   • `"consistent"` (default) — one layout per tool call. If every
-	 *     diff fits without excessive line wrapping → split; else →
-	 *     unified for all. Avoids `Edit 1 split, Edit 2 unified` mixed
-	 *     renders within one tool call.
-	 *   • `"split"`     — always side-by-side, even when long lines
-	 *     wrap.
-	 *   • `"unified"`   — always stacked single-column.
-	 *   • `"per-edit"`  — each diff picks independently (original
-	 *     pi-diff behaviour; can produce mixed layouts in one call).
-	 */
 	diffLayout: DiffLayoutPreference;
-
-	/**
-	 * Show a ticking timer in the streaming "Working…" line and persist
-	 * the total model working time per agent run as a muted line in chat
-	 * history (via a durable custom entry). Tool execution time is
-	 * excluded — only time the model spends streaming is counted.
-	 *
-	 * Defaults to `true`; override with env `FACELIFT_SHOW_WORKING_TIME`
-	 * (`0`/`false`/`off` to disable).
-	 */
 	showWorkingTime: boolean;
+	/** The default applies to any tool without an explicit entry. */
+	previewLines: Record<string, number> & { default: number };
+	highlight: { theme: string; maxChars: number; cacheLimit: number };
+	diff: {
+		theme: string;
+		preset: string;
+		colors: Record<string, string>;
+		maxChars: number;
+		cacheLimit: number;
+		splitMinWidth: number;
+		splitMinCodeWidth: number;
+	};
+	icons: "nerd" | "none";
+	imageProtocol: ImageProtocolPreference;
+	quoteUrl: string;
 }
 
-function isDiffLayout(value: unknown): value is DiffLayoutPreference {
-	return typeof value === "string" && (VALID_DIFF_LAYOUTS as readonly string[]).includes(value);
-}
-
-function parseBool(value: unknown, fallback: boolean): boolean {
-	if (typeof value === "boolean") return value;
-	if (typeof value === "string") {
-		const v = value.trim().toLowerCase();
-		if (["0", "false", "off", "no", "disabled"].includes(v)) return false;
-		if (["1", "true", "on", "yes", "enabled"].includes(v)) return true;
-	}
-	return fallback;
-}
-
-/**
- * Seed defaults from the environment. `DIFF_LAYOUT` is the only env
- * override today; everything else falls back to the hard-coded default.
- *
- * The env var is read at every defaults() call, not cached at module
- * load, so callers can change it between tests / sub-processes without
- * having to re-import the module.
- */
-export function envDefaults(): WierdFaceliftConfig {
-	const envLayout = process.env.DIFF_LAYOUT?.trim().toLowerCase();
-	const fromEnv = envLayout && isDiffLayout(envLayout) ? envLayout : undefined;
+export function defaultConfig(): WierdFaceliftConfig {
 	return {
-		diffLayout: fromEnv ?? DEFAULT_DIFF_LAYOUT,
-		showWorkingTime: parseBool(process.env.FACELIFT_SHOW_WORKING_TIME, true),
+		diffLayout: "consistent",
+		showWorkingTime: true,
+		previewLines: { default: 40, read: 10, grep: 10 },
+		highlight: { theme: "auto", maxChars: 80_000, cacheLimit: 128 },
+		diff: {
+			theme: "github-dark",
+			preset: "default",
+			colors: {},
+			maxChars: 80_000,
+			cacheLimit: 192,
+			splitMinWidth: 150,
+			splitMinCodeWidth: 60,
+		},
+		icons: "nerd",
+		imageProtocol: "auto",
+		quoteUrl: "https://quotes.samwho.dev/random",
 	};
 }
 
+const positiveInt = (value: unknown): value is number =>
+	Number.isSafeInteger(value) && Number(value) > 0;
+const record = (value: unknown): Record<string, unknown> =>
+	value && typeof value === "object" && !Array.isArray(value)
+		? (value as Record<string, unknown>)
+		: {};
+
 function sanitize(raw: unknown): WierdFaceliftConfig {
-	const defaults = envDefaults();
-	if (!raw || typeof raw !== "object") return defaults;
-	const obj = raw as Record<string, unknown>;
-	const cfg: WierdFaceliftConfig = { ...defaults };
-	if (isDiffLayout(obj.diffLayout)) cfg.diffLayout = obj.diffLayout;
+	const cfg = defaultConfig();
+	const obj = record(raw);
+	if ((VALID_DIFF_LAYOUTS as readonly unknown[]).includes(obj.diffLayout))
+		cfg.diffLayout = obj.diffLayout as DiffLayoutPreference;
 	if (typeof obj.showWorkingTime === "boolean") cfg.showWorkingTime = obj.showWorkingTime;
+	for (const [key, value] of Object.entries(record(obj.previewLines))) {
+		if (positiveInt(value)) cfg.previewLines[key] = value;
+	}
+	const highlight = record(obj.highlight);
+	if (typeof highlight.theme === "string" && highlight.theme.trim())
+		cfg.highlight.theme = highlight.theme;
+	if (positiveInt(highlight.maxChars)) cfg.highlight.maxChars = highlight.maxChars;
+	if (positiveInt(highlight.cacheLimit)) cfg.highlight.cacheLimit = highlight.cacheLimit;
+	const diff = record(obj.diff);
+	if (typeof diff.theme === "string" && diff.theme.trim()) cfg.diff.theme = diff.theme;
+	if (typeof diff.preset === "string" && diff.preset.trim()) cfg.diff.preset = diff.preset;
+	if (positiveInt(diff.maxChars)) cfg.diff.maxChars = diff.maxChars;
+	if (positiveInt(diff.cacheLimit)) cfg.diff.cacheLimit = diff.cacheLimit;
+	if (positiveInt(diff.splitMinWidth)) cfg.diff.splitMinWidth = diff.splitMinWidth;
+	if (positiveInt(diff.splitMinCodeWidth)) cfg.diff.splitMinCodeWidth = diff.splitMinCodeWidth;
+	for (const [key, value] of Object.entries(record(diff.colors))) {
+		if (typeof value === "string" && /^#[0-9a-fA-F]{6}$/.test(value)) cfg.diff.colors[key] = value;
+	}
+	if (obj.icons === "nerd" || obj.icons === "none") cfg.icons = obj.icons;
+	if (["auto", "kitty", "iterm2", "none"].includes(String(obj.imageProtocol)))
+		cfg.imageProtocol = obj.imageProtocol as ImageProtocolPreference;
+	if (typeof obj.quoteUrl === "string" && obj.quoteUrl.trim()) cfg.quoteUrl = obj.quoteUrl;
 	return cfg;
 }
 
-/**
- * Canonical config path. Wrapper around `paths.ts` so callers (status
- * commands, error messages) have a single import target.
- */
+export function previewLineLimit(toolName: string): number {
+	const lines = loadConfig().previewLines;
+	return lines[toolName] ?? lines.default;
+}
+
 export function getConfigPath(): string {
 	return defaultConfigPath();
 }
 
-/**
- * Load config from disk. Missing / unreadable file ⇒ env-seeded
- * defaults (no write). Unknown fields are silently dropped.
- */
+/** Missing or invalid files use defaults; Pi's process environment never overrides visual settings. */
 export function loadConfig(path: string = defaultConfigPath()): WierdFaceliftConfig {
 	try {
-		if (!existsSync(path)) return envDefaults();
-		const raw = readFileSync(path, "utf-8");
-		return sanitize(JSON.parse(raw));
+		return sanitize(JSON.parse(readFileSync(path, "utf8")));
 	} catch {
-		return envDefaults();
+		return defaultConfig();
 	}
 }
 
-/**
- * Persist config to disk. Creates the parent directory if missing.
- * Returns the path written to so callers can echo it in a status
- * message.
- */
 export function saveConfig(cfg: WierdFaceliftConfig, path: string = defaultConfigPath()): string {
-	if (path === defaultConfigPath()) {
-		ensureFaceliftDir();
-	} else {
-		const dir = dirname(path);
-		if (dir && !existsSync(dir)) {
-			mkdirSync(dir, { recursive: true });
-		}
-	}
-	const out: Record<string, unknown> = {
-		diffLayout: cfg.diffLayout,
-		showWorkingTime: cfg.showWorkingTime,
-	};
-	writeFileSync(path, `${JSON.stringify(out, null, 2)}\n`, "utf-8");
+	if (path === defaultConfigPath()) ensureFaceliftDir();
+	else mkdirSync(dirname(path), { recursive: true });
+	writeFileSync(path, `${JSON.stringify(sanitize(cfg), null, 2)}\n`, "utf8");
 	return path;
 }
 
-/**
- * Load config, seeding the file if missing. Used at extension boot so
- * users discover the config location naturally (via `/facelift` →
- * "config: ...") even before they edit anything.
- */
+/** Copy old facelift settings once; missing fields acquire the new defaults. */
 export function loadOrInitConfig(path: string = defaultConfigPath()): WierdFaceliftConfig {
-	if (!existsSync(path)) {
-		const legacyPath = legacyConfigPath();
-		const seeded =
-			path === defaultConfigPath() && existsSync(legacyPath)
-				? loadConfig(legacyPath)
-				: envDefaults();
-		try {
-			saveConfig(seeded, path);
-		} catch {
-			// Non-fatal: fall back to in-memory defaults if disk write fails.
-		}
-		return seeded;
+	if (existsSync(path)) return loadConfig(path);
+	const legacyPath = legacyConfigPath();
+	const seeded =
+		path === defaultConfigPath() && existsSync(legacyPath)
+			? loadConfig(legacyPath)
+			: defaultConfig();
+	try {
+		saveConfig(seeded, path);
+	} catch {
+		// Read-only directories should not prevent the extension from loading.
 	}
-	return loadConfig(path);
+	return seeded;
 }

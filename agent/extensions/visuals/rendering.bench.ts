@@ -96,10 +96,10 @@ beforeAll(async () => {
 	Object.defineProperty(process.stdout, "columns", { configurable: true, value: width });
 	readTool.renderResult(readResult, options, theme, readCtx);
 	const deadline = Date.now() + 5000;
-	while (!readCtx.state._rt?.includes("item79") && Date.now() < deadline) {
+	while (!readCtx.state._rt?.includes("item8") && Date.now() < deadline) {
 		await new Promise((resolve) => setTimeout(resolve, 10));
 	}
-	if (!readCtx.state._rt?.includes("item79")) throw new Error("read highlighter did not warm up");
+	if (!readCtx.state._rt?.includes("item8")) throw new Error("read highlighter did not warm up");
 
 	initTheme();
 	nestedRead = new ToolExecutionComponent(
@@ -115,10 +115,10 @@ beforeAll(async () => {
 	nestedRead.setArgsComplete();
 	nestedRead.updateResult({ ...readResult, isError: false });
 	const nestedDeadline = Date.now() + 5000;
-	while (!nestedRead.render(width).join("\n").includes("item79") && Date.now() < nestedDeadline) {
+	while (!nestedRead.render(width).join("\n").includes("item8") && Date.now() < nestedDeadline) {
 		await new Promise((resolve) => setTimeout(resolve, 10));
 	}
-	if (!nestedRead.render(width).join("\n").includes("item79"))
+	if (!nestedRead.render(width).join("\n").includes("item8"))
 		throw new Error("nested read did not warm up");
 
 	scriptComponent = renderCodemodeCall({ code: script }, theme, {
@@ -171,7 +171,7 @@ bench(
 	benchmark,
 );
 bench(
-	"read result, cached highlighting + Text.render",
+	"read result, 10-row preview + Text.render",
 	() => {
 		readTool.renderResult(readResult, options, theme, readCtx).render(width);
 	},
