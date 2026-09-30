@@ -1,5 +1,5 @@
-import { getLanguageFromPath, highlightCode, type ExtensionAPI, type Theme } from "@earendil-works/pi-coding-agent";
-import { wrapTextWithAnsi, type Component } from "@earendil-works/pi-tui";
+import { getLanguageFromPath, highlightCode, InteractiveMode, ToolExecutionComponent, type ExtensionAPI, type Theme } from "@earendil-works/pi-coding-agent";
+import { truncateToWidth, wrapTextWithAnsi, type Component } from "@earendil-works/pi-tui";
 import { format } from "prettier";
 import { detectedCodeLanguage } from "./shared/code-language.ts";
 import { DynamicText } from "./shared/dynamic-text.ts";
@@ -18,6 +18,7 @@ const NESTED_OUTPUT_MAX_CHARS = 8000;
 const OUTPUT_PREVIEW_LINES = 6;
 const EXPANDED_OUTPUT_LINES = 300;
 const SCRIPT_HEADER = /^Script (?:completed|failed)\nWall time [\d.]+ seconds\nOutput:\n$/;
+const GROUP_INDENT = 1;
 
 type CodemodeCall = {
 	id?: string;
@@ -29,17 +30,56 @@ type CodemodeCall = {
 	error?: string;
 };
 type CodemodeDetails = { calls?: CodemodeCall[]; fullOutputPath?: string };
-type NestedOutput = { text: string; images: number; truncated: boolean };
+type FallbackOutput = { text: string; images: number; truncated: boolean };
+type NestedOutput = {
+	input: Record<string, unknown>;
+	content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
+	details?: unknown;
+	isError: boolean;
+};
+type ModeBridge = {
+	ui: ConstructorParameters<typeof ToolExecutionComponent>[5];
+	sessionManager: { getCwd(): string };
+	getRegisteredToolDefinition(name: string): ConstructorParameters<typeof ToolExecutionComponent>[4];
+};
 
-// Nested tool results are not stored in codemode's transcript details. Keep
-// bounded, display-only results for live calls; older sessions show call
-// metadata without reconstructing results that Pi never recorded.
+// Pi does not persist nested results in the transcript. For live calls, reuse
+// the *actual* registered tool definition and ToolExecutionComponent so the
+// same facelift/diff renderers are used inside and outside codemode.
 const nestedOutputs = new Map<string, Map<string, NestedOutput>>();
+const nestedComponents = new Map<string, Map<string, { component: ToolExecutionComponent; output: NestedOutput }>>();
 const redrawParents = new Map<string, () => void>();
+let activeMode: ModeBridge | undefined;
+const MODE_PATCH = Symbol.for("pi.local-codemode-renderer.mode-bridge");
+
+function installModeBridge(): void {
+	type Patch = { original: ModeBridge["getRegisteredToolDefinition"]; capture: (mode: ModeBridge) => void };
+	const prototype = InteractiveMode.prototype as unknown as ModeBridge & { [MODE_PATCH]?: Patch };
+	let patch = prototype[MODE_PATCH];
+	if (!patch) {
+		const original = prototype.getRegisteredToolDefinition;
+		if (typeof original !== "function") return;
+		patch = { original, capture: () => {} };
+		Object.defineProperty(prototype, MODE_PATCH, { value: patch });
+		prototype.getRegisteredToolDefinition = function (this: ModeBridge, name: string) {
+			if (name === "codemode") patch!.capture(this);
+			return patch!.original.call(this, name);
+		};
+	}
+	// The prototype outlives extension reloads; point it at the current session.
+	patch.capture = mode => { activeMode = mode; };
+}
 
 function linesInFrame(line: string, theme: Theme, status: FrameStatus, width: number): string[] {
 	return wrapTextWithAnsi(line, Math.max(1, width - 3))
 		.map(part => frameBodyLines(part, status, theme, width, { paddingX: 1 }));
+}
+
+/** A single rail groups the script and its native tool rows without changing their renderers. */
+function grouped(lines: string[], theme: Theme, width: number): string[] {
+	const rail = theme.fg("borderMuted", "│");
+	const innerWidth = Math.max(1, width - GROUP_INDENT);
+	return lines.map(line => `${rail}${truncateToWidth(line, innerWidth, "")}`);
 }
 
 function preview(lines: string[], limit: number, theme: Theme): string[] {
@@ -47,16 +87,22 @@ function preview(lines: string[], limit: number, theme: Theme): string[] {
 	return [...lines.slice(0, limit), theme.fg("muted", `… ${lines.length - limit} more lines · Ctrl+O to expand`)];
 }
 
-function codeLines(code: string, theme: Theme): string[] {
+function codeLines(code: string, theme: Theme, width: number): string[] {
 	const source = code.replace(/\r\n?/g, "\n").trimEnd().split("\n");
 	let highlighted = source;
 	try {
+		// Highlight the current source, even while incomplete. This changes
+		// colours but not layout; Prettier still waits for the final input.
 		highlighted = highlightCode(source.join("\n"), "javascript");
 	} catch {
-		// Keep the source readable when highlighting is unavailable.
+		// Invalid partial JavaScript stays visible as plain text.
 	}
-	const digits = String(source.length).length;
-	return highlighted.map((line, index) => `${theme.fg("dim", `${String(index + 1).padStart(digits)} │`)} ${line}`);
+	const digits = Math.max(2, String(source.length).length);
+	const contentWidth = Math.max(1, width - digits - 6);
+	return highlighted.flatMap((line, index) => wrapTextWithAnsi(line, contentWidth).map((part, row) => {
+		const gutter = `${row === 0 ? String(index + 1).padStart(digits) : " ".repeat(digits)} │`;
+		return `${theme.fg("dim", gutter)} ${part}`;
+	}));
 }
 
 // Formatting is display-only: never change the source sent to the codemode tool.
@@ -89,7 +135,7 @@ function highlightLines(source: string, language: string | undefined): string[] 
 	}
 }
 
-function toolBox(call: CodemodeCall, output: NestedOutput | undefined, theme: Theme, width: number, expanded: boolean, invalidate?: () => void): string[] {
+function toolBox(call: CodemodeCall, output: FallbackOutput | undefined, theme: Theme, width: number, expanded: boolean, invalidate?: () => void): string[] {
 	const status = callStatus(call);
 	const duration = typeof call.durationMs === "number" ? ` · ${call.durationMs < 1000 ? `${Math.round(call.durationMs)}ms` : `${(call.durationMs / 1000).toFixed(1)}s`}` : "";
 	const title = theme.fg("toolTitle", theme.bold(call.name ?? "tool"));
@@ -125,6 +171,42 @@ function toolBox(call: CodemodeCall, output: NestedOutput | undefined, theme: Th
 	];
 }
 
+function nestedCallLines(call: CodemodeCall, parentId: string | undefined, theme: Theme, width: number, expanded: boolean, invalidate?: () => void): string[] {
+	const output = call.id && parentId ? nestedOutputs.get(parentId)?.get(call.id) : undefined;
+	if (output && parentId && call.id && activeMode) {
+		try {
+			const children = nestedComponents.get(parentId) ?? new Map<string, { component: ToolExecutionComponent; output: NestedOutput }>();
+			let cached = children.get(call.id);
+			if (!cached || cached.output !== output) {
+				const mode = activeMode;
+				const component = new ToolExecutionComponent(
+					call.name ?? "tool", call.id, output.input, {},
+					mode.getRegisteredToolDefinition(call.name ?? "tool"), mode.ui, mode.sessionManager.getCwd(),
+				);
+				component.markExecutionStarted();
+				component.setArgsComplete();
+				component.updateResult({ content: output.content, details: output.details, isError: output.isError });
+				cached = { component, output };
+				children.set(call.id, cached);
+				nestedComponents.set(parentId, children);
+			}
+			cached.component.setExpanded(expanded);
+			const lines = cached.component.render(width);
+			// Native tool rows add a leading spacer for top-level transcript
+			// layout. The grouping rail already separates adjacent boxes.
+			return lines[0] === "" ? lines.slice(1) : lines;
+		} catch {
+			// Unknown or changed Pi renderer internals: use the metadata fallback.
+		}
+	}
+	// Historical nested results only retain a short args preview and status.
+	return toolBox(call, output ? {
+		text: output.content.filter(block => block.type === "text").map(block => block.text ?? "").join("\n").slice(0, NESTED_OUTPUT_MAX_CHARS),
+		images: output.content.filter(block => block.type === "image").length,
+		truncated: false,
+	} : undefined, theme, width, expanded, invalidate);
+}
+
 function outputLines(result: ToolResult, theme: Theme, failed: boolean): string[] {
 	const content = result.content ?? [];
 	const blocks = content[0]?.type === "text" && SCRIPT_HEADER.test(content[0].text ?? "") ? content.slice(1) : content;
@@ -132,7 +214,7 @@ function outputLines(result: ToolResult, theme: Theme, failed: boolean): string[
 		if (block.type === "image") return [theme.fg("muted", `[image: ${block.mimeType ?? "unknown"}]`)];
 		if (block.type !== "text" || !block.text) return [];
 		return block.text.replace(/\r\n?/g, "\n").split("\n")
-			.map(line => theme.fg(failed ? "error" : "toolOutput", line));
+			.map(line => theme.fg(failed ? "error" : "muted", line));
 	});
 }
 
@@ -140,22 +222,29 @@ function renderCall(args: unknown, theme: Theme, context: ToolRenderContext): Co
 	const code = (args as { code?: unknown } | null)?.code;
 	const status = getFrameStatus(context);
 	const title = theme.fg("toolTitle", theme.bold("codemode"));
-	let displayCode = code;
-	if (typeof code === "string" && code) {
-		const entry = formattedScript(code);
-		displayCode = entry.value ?? code;
+	let displayCode = typeof code === "string" ? code : undefined;
+	// Restored session rows have a final result but may never receive
+	// setArgsComplete(). Execution or a final result also means input is done.
+	const complete = context.argsComplete || context.executionStarted || context.isPartial === false;
+	// Stream the original source as-is; format it only once input is complete.
+	if (complete && displayCode) {
+		const entry = formattedScript(displayCode);
+		displayCode = entry.value ?? displayCode;
 		if (entry.value === undefined) void entry.promise.then(formatted => {
-			if (displayCode !== formatted) {
-				displayCode = formatted;
-				context.invalidate?.();
-			}
+			displayCode = formatted;
+			context.invalidate?.();
 		});
 	}
-	return new DynamicText(width => [
-		frameTop(title, status, theme, width),
-		...((typeof displayCode === "string" && displayCode) ? codeLines(displayCode, theme) : [theme.fg("error", "(invalid or empty script)")])
-			.flatMap(line => linesInFrame(line, theme, status, width)),
-	].join("\n"));
+	return new DynamicText(width => {
+		const innerWidth = Math.max(1, width - GROUP_INDENT);
+		const source = displayCode
+			? codeLines(displayCode, theme, innerWidth)
+			: complete ? [theme.fg("error", "(invalid or empty script)")] : [];
+		return grouped([
+			frameTop(title, status, theme, innerWidth),
+			...source.flatMap(line => linesInFrame(line, theme, status, innerWidth)),
+		], theme, width);
+	});
 }
 
 function renderResult(result: ToolResult, options: { expanded: boolean; isPartial: boolean }, theme: Theme, context: ToolRenderContext): Component {
@@ -165,55 +254,60 @@ function renderResult(result: ToolResult, options: { expanded: boolean; isPartia
 	const status = getFrameStatus({ isError: failed, isPartial: options.isPartial });
 	if (context.toolCallId && context.invalidate) redrawParents.set(context.toolCallId, context.invalidate);
 	return new DynamicText(width => {
+		const innerWidth = Math.max(1, width - GROUP_INDENT);
 		const body: string[] = [];
-		const callFrames = calls.flatMap(call => {
-			// Each nested call has its own frame, inside codemode's outer frame.
-			const output = call.id && context.toolCallId ? nestedOutputs.get(context.toolCallId)?.get(call.id) : undefined;
-			return toolBox(call, output, theme, Math.max(8, width - 3), options.expanded, context.invalidate)
-				.map(line => frameBodyLines(line, status, theme, width, { paddingX: 1 }));
-		});
+		// Facelift's native renderers size frames from terminal.columns, not the
+		// component width. Give them the full width, then make room for the rail
+		// afterward; rendering them at innerWidth wraps borders into stray rows.
+		const callFrames = calls.flatMap(call => nestedCallLines(call, context.toolCallId, theme, width, options.expanded, context.invalidate));
 		if (!options.isPartial) {
-			// Nested calls already have output boxes. Keep script output only when
-			// there were no calls, or when it carries a script-level failure.
-			if (calls.length === 0 || failed) {
-				const output = outputLines(result, theme, failed);
-				if (output.length) {
-					body.push(theme.fg("muted", failed ? "↳ script error" : "↳ script output"));
-					body.push(...preview(output, options.expanded ? EXPANDED_OUTPUT_LINES : OUTPUT_PREVIEW_LINES, theme));
-				}
-				if (details.fullOutputPath && !options.expanded) body.push(theme.fg("muted", `Full output: ${details.fullOutputPath}`));
-			}
-		} else if (calls.length === 0) body.push(theme.fg("warning", "Running script…"));
+			// Pi's result contains text() output (and any returned value), not
+			// just nested tool results. Keep it visible after the tool boxes.
+			const output = outputLines(result, theme, failed);
+			body.push(...preview(output, options.expanded ? EXPANDED_OUTPUT_LINES : OUTPUT_PREVIEW_LINES, theme));
+			if (details.fullOutputPath && !options.expanded) body.push(theme.fg("muted", `Full output: ${details.fullOutputPath}`));
+		}
 		const label = options.isPartial ? "running" : failed ? "✗ failed" : "✓ complete";
-		return [
+		return grouped([
+			frameBottomWithLabel(`${label} · ${calls.length} tool call${calls.length === 1 ? "" : "s"}`, status, theme, innerWidth),
 			...callFrames,
-			...body.flatMap(line => line.split("\n").flatMap(part => linesInFrame(part, theme, status, width))),
-			frameBottomWithLabel(`${label} · ${calls.length} tool call${calls.length === 1 ? "" : "s"}`, status, theme, width),
-		].join("\n");
+			...(body.length ? [
+				frameTop(theme.fg("toolTitle", failed ? "script error" : "script output"), status, theme, innerWidth),
+				...body.flatMap(line => line.split("\n").flatMap(part => linesInFrame(part, theme, status, innerWidth))),
+				frameBottomWithLabel(failed ? "✗ failed" : "✓ complete", status, theme, innerWidth),
+			] : []),
+		], theme, width);
 	});
 }
 
 export default function (pi: ExtensionAPI): void {
+	installModeBridge();
 	// Register after other extensions' factories so we see their tool_result
 	// transformations (notably secret redaction), never the raw result.
 	pi.on("session_start", () => {
 		nestedOutputs.clear();
+		nestedComponents.clear();
 		redrawParents.clear();
 		pi.on("tool_result", event => {
 			const parent = event.parentToolCallId;
 			if (!parent) return;
-			const text = event.content.filter(block => block.type === "text").map(block => block.text).join("\n");
 			const outputs = nestedOutputs.get(parent) ?? new Map<string, NestedOutput>();
 			outputs.set(event.toolCallId, {
-				text: text.slice(0, NESTED_OUTPUT_MAX_CHARS),
-				images: event.content.filter(block => block.type === "image").length,
-				truncated: text.length > NESTED_OUTPUT_MAX_CHARS,
+				input: event.input,
+				content: event.content,
+				details: event.details,
+				isError: event.isError,
 			});
-			if (outputs.size > 64) outputs.delete(outputs.keys().next().value!);
+			if (outputs.size > 32) {
+				const oldest = outputs.keys().next().value!;
+				outputs.delete(oldest);
+				nestedComponents.get(parent)?.delete(oldest);
+			}
 			nestedOutputs.set(parent, outputs);
-			if (nestedOutputs.size > 32) {
+			if (nestedOutputs.size > 8) {
 				const oldest = nestedOutputs.keys().next().value!;
 				nestedOutputs.delete(oldest);
+				nestedComponents.delete(oldest);
 				redrawParents.delete(oldest);
 			}
 			redrawParents.get(parent)?.();
