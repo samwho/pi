@@ -29,6 +29,31 @@ function sessionCost(ctx: ExtensionContext): number {
 	return cost;
 }
 
+/** Session entries are append-only; scrolling doesn't change the leaf or model. */
+export function sessionStatsReader(ctx: ExtensionContext) {
+	let cached:
+		| {
+				leaf: string | null;
+				model: ExtensionContext["model"];
+				context: ReturnType<ExtensionContext["getContextUsage"]>;
+				cost: number;
+		  }
+		| undefined;
+	return {
+		read() {
+			const leaf = ctx.sessionManager.getLeafId();
+			const model = ctx.model;
+			if (!cached || cached.leaf !== leaf || cached.model !== model) {
+				cached = { leaf, model, context: ctx.getContextUsage(), cost: sessionCost(ctx) };
+			}
+			return cached;
+		},
+		invalidate() {
+			cached = undefined;
+		},
+	};
+}
+
 function priceColor(input: number | undefined, output: number | undefined): StatusColor {
 	const rates = [input, output].filter(
 		(rate): rate is number => typeof rate === "number" && Number.isFinite(rate),
@@ -149,6 +174,7 @@ function modelLabel(provider: string | undefined, id: string | undefined): strin
 
 export default function (pi: ExtensionAPI) {
 	let requestFooterRender: (() => void) | undefined;
+	let invalidateStats: (() => void) | undefined;
 	let gitDelta: GitDelta | null = null;
 	let gitRefreshVersion = 0;
 
@@ -192,11 +218,13 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => {
 		ctx.ui.setFooter((tui, theme, footerData) => {
 			requestFooterRender = () => tui.requestRender();
+			const stats = sessionStatsReader(ctx);
+			invalidateStats = () => stats.invalidate();
 			const unsubscribe = footerData.onBranchChange(() => tui.requestRender());
 
 			return {
 				render(width: number): string[] {
-					const context = ctx.getContextUsage();
+					const { context, cost } = stats.read();
 					const contextPercent = context?.percent;
 					const contextLabel = contextPercent == null ? "?" : `${contextPercent.toFixed(1)}%`;
 					const contextStatusColor = contextColor(contextPercent);
@@ -217,12 +245,7 @@ export default function (pi: ExtensionAPI) {
 								.join(" ")
 						: "";
 					const divider = theme.fg("dim", "|");
-					const left = [
-						cwdText,
-						deltaText,
-						contextText,
-						theme.fg("dim", `$${sessionCost(ctx).toFixed(2)}`),
-					]
+					const left = [cwdText, deltaText, contextText, theme.fg("dim", `$${cost.toFixed(2)}`)]
 						.filter(Boolean)
 						.join(` ${divider} `);
 
@@ -246,10 +269,13 @@ export default function (pi: ExtensionAPI) {
 
 					return [truncateToWidth(left + padding + right, width)];
 				},
-				invalidate() {},
+				invalidate() {
+					stats.invalidate();
+				},
 				dispose() {
 					unsubscribe();
 					requestFooterRender = undefined;
+					invalidateStats = undefined;
 				},
 			};
 		});
@@ -264,7 +290,12 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	// These changes can happen without a message being added to the branch.
-	pi.on("model_select", () => requestFooterRender?.());
+	const refreshStats = () => {
+		invalidateStats?.();
+		requestFooterRender?.();
+	};
+	pi.on("model_select", refreshStats);
 	pi.on("thinking_level_select", () => requestFooterRender?.());
-	pi.on("turn_end", () => requestFooterRender?.());
+	pi.on("turn_start", refreshStats);
+	pi.on("turn_end", refreshStats);
 }

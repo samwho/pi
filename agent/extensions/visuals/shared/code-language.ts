@@ -58,7 +58,7 @@ const LANGUAGE_ALIASES: Readonly<Record<string, string>> = {
 type CacheEntry = {
 	language?: string;
 	settled: boolean;
-	listeners: Set<() => void>;
+	listeners: Set<(language: string) => void>;
 };
 
 let model: ModelOperations | undefined;
@@ -122,7 +122,10 @@ function touch(key: string, entry: CacheEntry): void {
  * Return a cached language immediately. On a cache miss, start local detection
  * and invoke `onDetected` only if a confident language is found.
  */
-export function detectedCodeLanguage(text: string, onDetected?: () => void): string | undefined {
+export function detectedCodeLanguage(
+	text: string,
+	onDetected?: (language: string) => void,
+): string | undefined {
 	const explicit = explicitLanguage(text);
 	if (explicit) return explicit;
 
@@ -145,7 +148,7 @@ export function detectedCodeLanguage(text: string, onDetected?: () => void): str
 		.then((language) => {
 			entry.language = language;
 			entry.settled = true;
-			if (language) for (const listener of entry.listeners) listener();
+			if (language) for (const listener of entry.listeners) listener(language);
 			entry.listeners.clear();
 		});
 	return undefined;

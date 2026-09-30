@@ -2,6 +2,7 @@
 minimum_release_age = "0h"
 
 [tools]
+"aqua:tmux/tmux-builds" = "3.7c"
 "aqua:betterleaks/betterleaks" = "latest"
 "aqua:rtk-ai/rtk" = "latest"
 "npm:chrome-devtools-mcp" = "latest"

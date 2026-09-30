@@ -264,13 +264,22 @@ function nestedCallLines(
 			let cached = children.get(call.id);
 			if (!cached || cached.output !== output) {
 				const mode = activeMode;
+				let mounted = false;
+				const childUi = {
+					requestRender: () => {
+						// Deferred highlighting invalidates the child, but the cached
+						// parent also needs rebuilding before those rows become visible.
+						if (mounted) invalidate?.();
+						mode.ui.requestRender();
+					},
+				};
 				const component = new ToolExecutionComponent(
 					call.name ?? "tool",
 					call.id,
 					output.input,
 					{},
 					mode.getRegisteredToolDefinition(call.name ?? "tool"),
-					mode.ui,
+					childUi as typeof mode.ui,
 					mode.sessionManager.getCwd(),
 				);
 				component.markExecutionStarted();
@@ -280,6 +289,7 @@ function nestedCallLines(
 					details: output.details,
 					isError: output.isError,
 				});
+				mounted = true;
 				cached = { component, output, expanded: false };
 				children.set(call.id, cached);
 				nestedComponents.set(parentId, children);
@@ -338,6 +348,56 @@ function outputLines(result: ToolResult, theme: Theme, failed: boolean): string[
 	});
 }
 
+function scriptOutputFrame(
+	result: ToolResult,
+	details: CodemodeDetails,
+	expanded: boolean,
+	theme: Theme,
+	failed: boolean,
+	width: number,
+): string[] {
+	const status = failed ? "error" : "success";
+	const rows = outputLines(result, theme, failed).flatMap((line) =>
+		linesInFrame(line, theme, status, width),
+	);
+	const limit = previewLineLimit("codemode");
+	const shown = limit - 1;
+	const body =
+		!expanded && rows.length > limit
+			? [
+					...rows.slice(0, shown),
+					frameBodyLines(
+						theme.fg("muted", `… ${rows.length - shown} more output rows · Ctrl+O to expand`),
+						status,
+						theme,
+						width,
+						{ paddingX: 1 },
+					),
+				]
+			: rows;
+	// Keep the full-output location visible even when its preview is clipped.
+	if (details.fullOutputPath && !expanded)
+		body.push(
+			...linesInFrame(
+				theme.fg("muted", `Full output: ${details.fullOutputPath}`),
+				theme,
+				status,
+				width,
+			),
+		);
+	if (!body.length) return [];
+	return [
+		frameToolCall(
+			{ name: failed ? "script error" : "script output", boldName: false },
+			status,
+			theme,
+			width,
+		),
+		...body,
+		frameBottomWithLabel(failed ? "✗ failed" : "✓ complete", status, theme, width),
+	];
+}
+
 export function renderCall(args: unknown, theme: Theme, context: ToolRenderContext): Component {
 	const code = (args as { code?: unknown } | null)?.code;
 	const status = getFrameStatus(context);
@@ -348,7 +408,13 @@ export function renderCall(args: unknown, theme: Theme, context: ToolRenderConte
 	// Stream the original source as-is; format it only once input is complete.
 	let formatPending: Promise<string> | undefined;
 	if (complete && displayCode) {
-		const entry = formattedScript(displayCode);
+		const retained = context.state?._codemodeFormat as
+			| { source: string; entry: ReturnType<typeof formattedScript> }
+			| undefined;
+		const entry = retained?.source === displayCode ? retained.entry : formattedScript(displayCode);
+		// The shared LRU is small. Retain this tool's promise in its renderer
+		// state, or >32 restored scripts repeatedly evict and reformat each other.
+		if (context.state) context.state._codemodeFormat = { source: displayCode, entry };
 		displayCode = entry.value ?? displayCode;
 		if (entry.value === undefined) formatPending = entry.promise;
 	}
@@ -377,7 +443,7 @@ export function renderCall(args: unknown, theme: Theme, context: ToolRenderConte
 	return component;
 }
 
-function renderResult(
+export function renderResult(
 	result: ToolResult,
 	options: { expanded: boolean; isPartial: boolean },
 	theme: Theme,
@@ -391,21 +457,17 @@ function renderResult(
 		redrawParents.set(context.toolCallId, context.invalidate);
 	return new DynamicText((width) => {
 		const innerWidth = Math.max(1, width - GROUP_INDENT);
-		const body: string[] = [];
 		// Facelift's native renderers size frames from terminal.columns, not the
 		// component width. Give them the full width, then make room for the rail
 		// afterward; rendering them at innerWidth wraps borders into stray rows.
 		const callFrames = calls.flatMap((call) =>
 			nestedCallLines(call, context.toolCallId, theme, width, options.expanded, context.invalidate),
 		);
-		if (!options.isPartial) {
-			// Pi's result contains text() output (and any returned value), not
-			// just nested tool results. Keep it visible after the tool boxes.
-			const output = outputLines(result, theme, failed);
-			body.push(...output);
-			if (details.fullOutputPath && !options.expanded)
-				body.push(theme.fg("muted", `Full output: ${details.fullOutputPath}`));
-		}
+		// Nested tools already own their previews. Limit only the actual script
+		// output, so a parent preview never cuts a tool box or hides later calls.
+		const outputFrame = options.isPartial
+			? []
+			: scriptOutputFrame(result, details, options.expanded, theme, failed, innerWidth);
 		const label = options.isPartial ? "running" : failed ? "✗ failed" : "✓ complete";
 		return grouped(
 			[
@@ -416,25 +478,12 @@ function renderResult(
 					innerWidth,
 				),
 				...callFrames,
-				...(body.length
-					? [
-							frameToolCall(
-								{ name: failed ? "script error" : "script output", boldName: false },
-								status,
-								theme,
-								innerWidth,
-							),
-							...body.flatMap((line) =>
-								line.split("\n").flatMap((part) => linesInFrame(part, theme, status, innerWidth)),
-							),
-							frameBottomWithLabel(failed ? "✗ failed" : "✓ complete", status, theme, innerWidth),
-						]
-					: []),
+				...outputFrame,
 			],
 			theme,
 			width,
 		);
-	});
+	}, !options.isPartial);
 }
 
 export default function (pi: ExtensionAPI): void {
@@ -471,6 +520,7 @@ export default function (pi: ExtensionAPI): void {
 		});
 	});
 	registerToolRenderer(["codemode"], {
+		managesResultPreview: true,
 		renderCall: (_toolName, args, theme, context) => renderCall(args, theme, context),
 		renderResult: (_toolName, result, options, theme, context) =>
 			renderResult(result, options, theme, context),

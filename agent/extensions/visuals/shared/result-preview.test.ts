@@ -138,6 +138,26 @@ describe("tool result preview", () => {
 		expect(reused.every((text) => text === reused[0])).toBe(true);
 	});
 
+	it("reuses clipped previews only while the child rows and width are unchanged", () => {
+		let childRows = [...rows, "╰────────"];
+		const child = {
+			render: () => childRows,
+			invalidate: () => {
+				childRows = [...childRows];
+			},
+		};
+		const preview = limitResultPreview(child, "read", false, theme, {});
+		const first = preview.render(100);
+		expect(preview.render(100)).toBe(first);
+		expect(preview.render(80)).not.toBe(first);
+		childRows = ["│ changed", ...rows, "╰────────"];
+		expect(preview.render(100)[0]).toBe("│ changed");
+		const changed = preview.render(100);
+		preview.invalidate?.();
+		expect(preview.render(100)).toEqual(changed);
+		expect(preview.render(100)).not.toBe(changed);
+	});
+
 	it("also limits results without a visual frame", () => {
 		const plain: Component = { render: () => rows, invalidate: () => {} };
 		const shown = limitResultPreview(plain, "other", false, theme, {}).render(100);

@@ -13,9 +13,11 @@ export function limitResultPreview(
 ): Component {
 	if (expanded) return component;
 	const limit = previewLineLimit(toolName);
+	let cached: { rows: string[]; width: number; preview: string[] } | undefined;
 	return {
 		render(width) {
 			const rows = component.render(width);
+			if (cached?.rows === rows && cached.width === width) return cached.preview;
 			const last = rows.at(-1);
 			const framed =
 				last !== undefined && /^(?:│)?╰/.test(last.replace(/\x1b\[[0-9;]*m/g, "").trimStart());
@@ -23,13 +25,16 @@ export function limitResultPreview(
 			if (body.length <= limit) return rows;
 			const shown = limit - 1; // Reserve one of the configured rows for the notice.
 			const notice = theme.fg("muted", `… ${body.length - shown} more lines · Ctrl+O to expand`);
-			return [
+			const preview = [
 				...body.slice(0, shown),
 				framed ? frameBodyLines(notice, getFrameStatus(context), theme, width) : notice,
 				...(framed && last !== undefined ? [last] : []),
 			];
+			cached = { rows, width, preview };
+			return preview;
 		},
 		invalidate() {
+			cached = undefined;
 			component.invalidate?.();
 		},
 	};

@@ -12,6 +12,10 @@ export type ToolRenderContext = {
 	isError?: boolean;
 	isPartial?: boolean;
 	executionStarted?: boolean;
+	displayName?: string;
+	hasResult?: boolean;
+	/** Pi's safe text/image fallback extraction, applied to the decorated result. */
+	getTextOutput?: (result: ToolResult) => string;
 	state?: Record<string, unknown>;
 	invalidate?: () => void;
 };
@@ -44,10 +48,21 @@ type ToolExecutionPrototype = Record<string | symbol, unknown>;
 type InternalToolExecution = {
 	toolName?: unknown;
 	expanded?: boolean;
-	getTextOutput?: () => string;
+	showImages?: boolean;
+	result?: ToolResult;
+	toolDefinition?: {
+		label?: string;
+		namespace?: { name: string };
+		renderShell?: string;
+		renderCall?: unknown;
+		renderResult?: unknown;
+	};
+	getTextOutput?: (this: { result?: ToolResult; showImages?: boolean }) => string;
 };
 
 type RegisteredRenderer = {
+	/** Composite renderers limit their own sections rather than clipping the whole group. */
+	managesResultPreview?: boolean;
 	renderCall: CallRenderer;
 	renderResult: ResultRenderer;
 };
@@ -55,6 +70,8 @@ type PatchState = {
 	originalCallRenderer: (...args: unknown[]) => unknown;
 	originalResultRenderer: (...args: unknown[]) => unknown;
 	originalRenderShell: (...args: unknown[]) => unknown;
+	originalHasRendererDefinition?: (this: InternalToolExecution) => boolean;
+	fallbackRenderer?: RegisteredRenderer;
 	originalFormatToolExecution?: (this: InternalToolExecution) => string;
 	renderers: Map<string, RegisteredRenderer>;
 	decorators: Map<string, ResultDecorator>;
@@ -73,6 +90,40 @@ function registeredRendererFor(
 		if (pattern.endsWith("*") && toolName.startsWith(pattern.slice(0, -1))) return renderer;
 	}
 	return undefined;
+}
+
+function rendererFor(
+	state: PatchState,
+	instance: InternalToolExecution,
+): RegisteredRenderer | undefined {
+	const specific = registeredRendererFor(state, String(instance.toolName));
+	if (specific || !state.fallbackRenderer) return specific;
+	const definition = instance.toolDefinition;
+	// MCP supplies generic Text renderers, not a specialised UI. Keep explicit
+	// self-framed MCP UIs and every other extension's custom renderers intact.
+	const genericMcp =
+		String(instance.toolName).startsWith("mcp__") &&
+		definition?.namespace?.name.startsWith("mcp__");
+	if (
+		definition?.renderShell === "self" ||
+		(!genericMcp && (definition?.renderCall || definition?.renderResult))
+	)
+		return undefined;
+	return state.fallbackRenderer;
+}
+
+function extendContext(
+	instance: InternalToolExecution,
+	context: ToolRenderContext,
+): ToolRenderContext {
+	return {
+		...context,
+		displayName:
+			instance.toolDefinition?.label ?? String(instance.toolName).replace(/^mcp__(.*?)__/, "$1/"),
+		hasResult: instance.result !== undefined,
+		getTextOutput: (result) =>
+			instance.getTextOutput?.call({ result, showImages: instance.showImages }) ?? "",
+	};
 }
 
 /**
@@ -121,6 +172,15 @@ export function registerToolRenderer(
 	// renderers and decorators also work without restarting Pi.
 	state.decorators ??= new Map();
 	state.previewComponents ??= new WeakMap();
+	state.originalHasRendererDefinition ??=
+		typeof prototype.hasRendererDefinition === "function"
+			? (prototype.hasRendererDefinition as PatchState["originalHasRendererDefinition"])
+			: undefined;
+	if (state.originalHasRendererDefinition) {
+		prototype.hasRendererDefinition = function (this: InternalToolExecution): boolean {
+			return !!rendererFor(state, this) || state.originalHasRendererDefinition!.call(this);
+		};
+	}
 	state.originalFormatToolExecution ??=
 		typeof prototype.formatToolExecution === "function"
 			? (prototype.formatToolExecution as PatchState["originalFormatToolExecution"])
@@ -137,21 +197,19 @@ export function registerToolRenderer(
 		};
 	}
 	prototype.getRenderShell = function (this: InternalToolExecution): unknown {
-		return registeredRendererFor(state, String(this.toolName))
-			? "self"
-			: state.originalRenderShell.call(this);
+		return rendererFor(state, this) ? "self" : state.originalRenderShell.call(this);
 	};
 	prototype.getCallRenderer = function (this: InternalToolExecution): unknown {
 		const toolName = String(this.toolName);
-		const registered = registeredRendererFor(state, toolName);
+		const registered = rendererFor(state, this);
 		return registered
 			? (args: unknown, theme: Theme, context: ToolRenderContext) =>
-					registered.renderCall(toolName, args, theme, context)
+					registered.renderCall(toolName, args, theme, extendContext(this, context))
 			: state.originalCallRenderer.call(this);
 	};
 	prototype.getResultRenderer = function (this: InternalToolExecution): unknown {
 		const toolName = String(this.toolName);
-		const registered = registeredRendererFor(state, toolName);
+		const registered = rendererFor(state, this);
 		const resultRenderer = registered
 			? (
 					result: ToolResult,
@@ -172,12 +230,15 @@ export function registerToolRenderer(
 			// Renderers must receive their own component (e.g. Text with setText),
 			// not the display-only wrapper, or Pi silently falls back to plain output.
 			const lastComponent = context.lastComponent;
-			const renderContext = lastComponent
-				? {
-						...context,
-						lastComponent: state.previewComponents!.get(lastComponent) ?? lastComponent,
-					}
-				: context;
+			const renderContext = extendContext(
+				this,
+				lastComponent
+					? {
+							...context,
+							lastComponent: state.previewComponents!.get(lastComponent) ?? lastComponent,
+						}
+					: context,
+			);
 			const decorated = decorator
 				? decorator(toolName, result, options, theme, renderContext)
 				: result;
@@ -188,12 +249,22 @@ export function registerToolRenderer(
 				renderContext,
 			);
 			if (!component) return component;
-			const preview = limitResultPreview(component, toolName, options.expanded, theme, context);
+			const preview = registered?.managesResultPreview
+				? component
+				: limitResultPreview(component, toolName, options.expanded, theme, context);
 			if (preview !== component) state.previewComponents!.set(preview, component);
 			return preview;
 		};
 	};
 	for (const toolName of toolNames) state.renderers.set(toolName, renderer);
+}
+
+/** Use consistent chrome for tools without a specialised renderer, including generic MCP tools. */
+export function registerFallbackToolRenderer(renderer: RegisteredRenderer): void {
+	registerToolRenderer([], renderer);
+	const prototype = ToolExecutionComponent.prototype as unknown as ToolExecutionPrototype;
+	const state = prototype[PATCH] as PatchState | undefined;
+	if (state?.originalHasRendererDefinition) state.fallbackRenderer = renderer;
 }
 
 /** Decorate display-only result data before an existing tool renderer sees it. */

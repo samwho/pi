@@ -5,6 +5,7 @@ import registerBuiltinTools, {
 } from "./builtin-tools.ts";
 import registerCodeOutputHighlighter from "./code-output-highlighter/index.ts";
 import registerCodemodeRenderer from "./codemode-renderer.ts";
+import registerFallbackRenderer from "./fallback-renderer.ts";
 import registerSessionFooter from "./session-footer.ts";
 import registerSimpleWorkingTime from "./simple-working-time.ts";
 import registerWebSearchRenderer from "./web-search-renderer.ts";
@@ -19,6 +20,7 @@ export default function visuals(pi: BuiltinToolApi, deps?: BuiltinToolDeps): voi
 	if (deps) return;
 
 	const runtime = pi as unknown as ExtensionAPI;
+	registerFallbackRenderer(runtime);
 	registerCodeOutputHighlighter(runtime);
 	registerCodemodeRenderer(runtime);
 	registerWebSearchRenderer(runtime);

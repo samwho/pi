@@ -2,8 +2,9 @@ import { execFileSync } from "node:child_process";
 import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, it } from "vitest";
-import { countUntrackedLines } from "./session-footer.ts";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { afterEach, expect, it, vi } from "vitest";
+import { countUntrackedLines, sessionStatsReader } from "./session-footer.ts";
 
 let dir: string | undefined;
 afterEach(async () => {
@@ -43,4 +44,39 @@ it("adds every untracked text line, not a count of files or directories", async 
 it("ignores files removed after Git lists them", async () => {
 	dir = await mkdtemp(join(tmpdir(), "pi-footer-git-"));
 	expect(await countUntrackedLines(dir, "gone.txt\0")).toBe(0);
+});
+
+it("does not rebuild session projections or scan costs while scrolling", () => {
+	let leaf = "first";
+	const entries: any[] = [
+		{ type: "message", message: { role: "assistant", usage: { cost: { total: 1 } } } },
+		{ type: "message", message: { role: "toolResult", usage: { cost: { total: 2 } } } },
+		{ type: "compaction", usage: { cost: { total: 3 } } },
+		{ type: "branch_summary", usage: { cost: { total: 4 } } },
+	];
+	const getEntries = vi.fn(() => entries);
+	const getContextUsage = vi.fn(() => ({ tokens: 100, contextWindow: 1000, percent: 10 }));
+	const ctx = {
+		model: { id: "fixture" },
+		sessionManager: { getLeafId: () => leaf, getEntries },
+		getContextUsage,
+	} as unknown as ExtensionContext;
+	const stats = sessionStatsReader(ctx);
+	for (let i = 0; i < 1000; i++) expect(stats.read().cost).toBe(10);
+	expect(getEntries).toHaveBeenCalledTimes(1);
+	expect(getContextUsage).toHaveBeenCalledTimes(1);
+
+	// Appends, compaction, and branch navigation all change the leaf.
+	entries.push({ type: "message", message: { role: "assistant", usage: { cost: { total: 5 } } } });
+	leaf = "second";
+	expect(stats.read().cost).toBe(15);
+	leaf = "first";
+	expect(stats.read().cost).toBe(15); // Cost includes abandoned branches, as before.
+	expect(getContextUsage).toHaveBeenCalledTimes(3);
+	ctx.model = { id: "other" } as ExtensionContext["model"];
+	stats.read();
+	expect(getContextUsage).toHaveBeenCalledTimes(4);
+	stats.invalidate();
+	stats.read();
+	expect(getContextUsage).toHaveBeenCalledTimes(5);
 });

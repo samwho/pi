@@ -9,6 +9,8 @@
 		"typecheck": "tsc --noEmit -p tsconfig.json",
 		"test": "vitest run visuals --config visuals/vitest.config.ts",
 		"bench:render": "vitest bench visuals/rendering.bench.ts --config visuals/vitest.config.ts",
+		"test:scroll": "node visuals/perf/run.mjs",
+		"profile:scroll": "node visuals/perf/run.mjs --profile",
 		"check": "npm run format:check && npm run lint && npm run typecheck && npm run test"
 	},
 	"dependencies": {

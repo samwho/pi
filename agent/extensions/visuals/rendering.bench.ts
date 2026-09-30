@@ -3,7 +3,11 @@ import { Text, truncateToWidth, type Component } from "@earendil-works/pi-tui";
 import { bench, afterAll, beforeAll } from "vitest";
 import registerBuiltinTools from "./builtin-tools.ts";
 import { genericFallback } from "./code-output-highlighter/index.ts";
-import { grouped, renderCall as renderCodemodeCall } from "./codemode-renderer.ts";
+import {
+	grouped,
+	renderCall as renderCodemodeCall,
+	renderResult as renderCodemodeResult,
+} from "./codemode-renderer.ts";
 import { renderResultFor as renderWebResult } from "./web-search-renderer.ts";
 import { frameToolCall } from "./shared/tool-heading.ts";
 import { frameResult } from "./common/tool-frame/index.ts";
@@ -80,6 +84,7 @@ let nestedRead: ToolExecutionComponent;
 let scriptComponent: Component;
 let webComponent: Component;
 let genericComponent: Component;
+let codemodeResults: Component[];
 const jsonOutput = JSON.stringify(
 	{ items: Array.from({ length: 80 }, (_, i) => ({ id: i, title: `Item ${i}` })) },
 	null,
@@ -142,6 +147,20 @@ beforeAll(async () => {
 		() => new Text(jsonOutput, 0, 0),
 	)!;
 	genericComponent.render(width);
+	codemodeResults = Array.from({ length: 250 }, (_, i) =>
+		renderCodemodeResult(
+			{
+				content: [{ type: "text", text: jsonOutput }],
+				details: {
+					calls: [{ name: "read", args: `{"path":"example${i}.ts"}`, status: "success" }],
+				},
+			},
+			options,
+			theme,
+			{},
+		),
+	);
+	for (const component of codemodeResults) component.render(width);
 });
 
 afterAll(() => {
@@ -151,6 +170,13 @@ afterAll(() => {
 });
 
 const benchmark = { time: 800, warmupTime: 200 };
+bench(
+	"250 completed codemode results, scrolling redraw",
+	() => {
+		for (const component of codemodeResults) renderedLines = component.render(width);
+	},
+	benchmark,
+);
 bench(
 	"tool heading, one argument",
 	() => {
