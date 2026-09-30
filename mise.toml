@@ -4,3 +4,5 @@
 "npm:chrome-devtools-mcp" = "latest"
 "npm:@earendil-works/pi-coding-agent" = "latest"
 uv = "latest"
+oxlint = "1.84.0"
+oxfmt = "0.71.0"

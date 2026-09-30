@@ -174,7 +174,13 @@ function addConfiguredExtensions(settingsPath: string, baseDir: string, paths: S
 	}
 }
 
-const CONTEXT_FILE_NAMES = ["AGENTS.override.md", "AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"];
+const CONTEXT_FILE_NAMES = [
+	"AGENTS.override.md",
+	"AGENTS.md",
+	"AGENTS.MD",
+	"CLAUDE.md",
+	"CLAUDE.MD",
+];
 
 function contextFilePath(directory: string): string | undefined {
 	for (const name of CONTEXT_FILE_NAMES) {
@@ -193,12 +199,14 @@ function systemPromptContextPaths(ctx: ExtensionContext): Set<string> {
 	const agentDir = agentDirectory();
 	const projectConfigDir = join(resolve(ctx.cwd), CONFIG_DIR_NAME);
 	const trusted = ctx.isProjectTrusted();
-	const systemPrompt = trusted && existsSync(join(projectConfigDir, "SYSTEM.md"))
-		? join(projectConfigDir, "SYSTEM.md")
-		: join(agentDir, "SYSTEM.md");
-	const appendSystemPrompt = trusted && existsSync(join(projectConfigDir, "APPEND_SYSTEM.md"))
-		? join(projectConfigDir, "APPEND_SYSTEM.md")
-		: join(agentDir, "APPEND_SYSTEM.md");
+	const systemPrompt =
+		trusted && existsSync(join(projectConfigDir, "SYSTEM.md"))
+			? join(projectConfigDir, "SYSTEM.md")
+			: join(agentDir, "SYSTEM.md");
+	const appendSystemPrompt =
+		trusted && existsSync(join(projectConfigDir, "APPEND_SYSTEM.md"))
+			? join(projectConfigDir, "APPEND_SYSTEM.md")
+			: join(agentDir, "APPEND_SYSTEM.md");
 	for (const path of [systemPrompt, appendSystemPrompt]) {
 		try {
 			if (statSync(path).isFile()) paths.add(resolve(path));
@@ -211,7 +219,8 @@ function systemPromptContextPaths(ctx: ExtensionContext): Set<string> {
 
 function countContextFiles(ctx: ExtensionContext): number {
 	const paths = systemPromptContextPaths(ctx);
-	if (process.argv.includes("-nc") || process.argv.includes("--no-context-files")) return paths.size;
+	if (process.argv.includes("-nc") || process.argv.includes("--no-context-files"))
+		return paths.size;
 
 	const globalContext = contextFilePath(agentDirectory());
 	if (globalContext) paths.add(globalContext);
@@ -227,7 +236,11 @@ function countContextFiles(ctx: ExtensionContext): number {
 	return paths.size;
 }
 
-function skillDirectoryPaths(directory: string, paths: Set<string>, includeRootFiles: boolean): void {
+function skillDirectoryPaths(
+	directory: string,
+	paths: Set<string>,
+	includeRootFiles: boolean,
+): void {
 	let entries;
 	try {
 		entries = readdirSync(directory, { withFileTypes: true });
@@ -520,9 +533,7 @@ export default function (pi: ExtensionAPI): void {
 						];
 					} else if (quoteState === "error" || !quote) {
 						quoteRows = [
-							row(
-								`${theme.fg("borderMuted", "│")} ${theme.fg("error", "Unable to load quote.")}`,
-							),
+							row(`${theme.fg("borderMuted", "│")} ${theme.fg("error", "Unable to load quote.")}`),
 						];
 					} else {
 						const quoteText = `“${quote.text}”`;
@@ -531,7 +542,7 @@ export default function (pi: ExtensionAPI): void {
 							? hyperlink(
 									theme.fg("accent", theme.underline(`— ${quote.author}`)),
 									quote.wikipediaUrl,
-							  )
+								)
 							: theme.fg("accent", `— ${quote.author}`);
 						quoteRows = [
 							...quoteLines.map((line) =>

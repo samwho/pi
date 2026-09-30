@@ -79,16 +79,17 @@ function sampleUtf8(text: string): string {
 
 function normalize(text: string): string {
 	return sampleUtf8(
-		text
-			.replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
-			.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, ""),
+		text.replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "").replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, ""),
 	).trim();
 }
 
 function explicitLanguage(text: string): string | undefined {
 	const trimmed = text.trim();
 	if (!trimmed) return undefined;
-	if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+	if (
+		(trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+		(trimmed.startsWith("[") && trimmed.endsWith("]"))
+	) {
 		try {
 			JSON.parse(trimmed);
 			return "json";
@@ -111,7 +112,7 @@ function touch(key: string, entry: CacheEntry): void {
 	cache.delete(key);
 	cache.set(key, entry);
 	while (cache.size > CACHE_LIMIT) {
-		const oldest = cache.keys().next().value as string | undefined;
+		const oldest = cache.keys().next().value;
 		if (oldest === undefined) break;
 		cache.delete(oldest);
 	}
@@ -137,7 +138,7 @@ export function detectedCodeLanguage(text: string, onDetected?: () => void): str
 
 	const entry: CacheEntry = { settled: false, listeners: new Set(onDetected ? [onDetected] : []) };
 	touch(sample, entry);
-	getModel()
+	void getModel()
 		.runModel(sample)
 		.then(selectLanguage)
 		.catch(() => undefined)

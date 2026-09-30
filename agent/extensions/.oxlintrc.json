@@ -1,0 +1,38 @@
+{
+	"plugins": ["typescript", "unicorn", "oxc", "import", "promise", "node", "vitest"],
+	"categories": {
+		"correctness": "error",
+		"suspicious": "error",
+		"perf": "error"
+	},
+	"rules": {
+		"no-underscore-dangle": "off",
+		"no-control-regex": "off",
+		"no-await-in-loop": "off",
+		"no-useless-constructor": "off",
+		"unicorn/consistent-function-scoping": "off",
+		"unicorn/no-array-sort": "off",
+		"unicorn/no-array-reverse": "off",
+		"typescript/no-unsafe-type-assertion": "off",
+		"promise/always-return": "off",
+		"typescript/no-floating-promises": "error",
+		"typescript/no-misused-promises": "error",
+		"typescript/no-unnecessary-type-assertion": "error",
+		"typescript/unbound-method": "error"
+	},
+	"overrides": [
+		{
+			"files": ["**/*.test.ts"],
+			"rules": { "vitest/require-mock-type-parameters": "off" }
+		},
+		{
+			"files": ["visuals/common/diff/index.ts"],
+			"rules": { "no-unused-vars": "off", "no-shadow": "off" }
+		},
+		{
+			"files": ["visuals/builtin-tools.ts"],
+			"rules": { "typescript/no-unnecessary-type-parameters": "off" }
+		}
+	],
+	"env": { "builtin": true }
+}

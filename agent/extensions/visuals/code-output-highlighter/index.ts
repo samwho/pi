@@ -51,7 +51,7 @@ function highlightedLines(source: string, language: string): string[] | undefine
 	}
 }
 
-function genericFallback(
+export function genericFallback(
 	instance: InternalToolExecution,
 	original: (this: InternalToolExecution) => Component | undefined,
 ): Component | undefined {
@@ -59,11 +59,16 @@ function genericFallback(
 	const output = instance.getTextOutput?.() ?? "";
 	if (!fallback || !output || instance.isPartial || /\x1b(?:\[|\])/.test(output)) return fallback;
 
-	const language = () => detectedCodeLanguage(output, () => instance.ui?.requestRender?.());
+	let component: DynamicText | undefined;
+	const language = () =>
+		detectedCodeLanguage(output, () => {
+			component?.invalidate();
+			instance.ui?.requestRender?.();
+		});
 	// Start detection now rather than waiting for the first terminal render.
 	language();
 
-	return new DynamicText((width) => {
+	component = new DynamicText((width) => {
 		const detected = language();
 		if (!detected) return fallback.render(width);
 
@@ -72,10 +77,13 @@ function genericFallback(
 		const highlighted = highlightedLines(shown.join("\n"), detected);
 		if (!highlighted) return fallback.render(width);
 		if (shown.length < lines.length) {
-			highlighted.push(`... (${lines.length - shown.length} more lines, ${keyHint("app.tools.expand", "to expand")})`);
+			highlighted.push(
+				`... (${lines.length - shown.length} more lines, ${keyHint("app.tools.expand", "to expand")})`,
+			);
 		}
 		return highlighted;
-	});
+	}, true);
+	return component;
 }
 
 function installFallbackPatch(): void {
@@ -92,7 +100,7 @@ function installFallbackPatch(): void {
 			render: (instance) => genericFallback(instance, original as PrototypePatch["original"]),
 		};
 		Object.defineProperty(prototype, PATCH, { value: state, configurable: false });
-		prototype.createResultFallback = function(this: InternalToolExecution): Component | undefined {
+		prototype.createResultFallback = function (this: InternalToolExecution): Component | undefined {
 			return state!.render(this);
 		};
 	} else {
@@ -110,7 +118,8 @@ function highlightBashResult(
 ): ToolResult {
 	if (options.isPartial) return result;
 	const details = result.details as TextResultDetails | undefined;
-	if (details?._type !== "bashResult" || typeof details.text !== "string" || !details.text) return result;
+	if (details?._type !== "bashResult" || typeof details.text !== "string" || !details.text)
+		return result;
 
 	const language = detectedCodeLanguage(details.text, context.invalidate);
 	if (!language) return result;
@@ -193,7 +202,8 @@ function highlightGrepResult(
 		typeof details.text !== "string" ||
 		!details.text ||
 		typeof details.pattern !== "string"
-	) return result;
+	)
+		return result;
 
 	const parsed = details.text.split("\n").map(parseGrepLine);
 	const contentByFile = new Map<string, string[]>();
@@ -211,7 +221,10 @@ function highlightGrepResult(
 	};
 	const languages = new Map<string, string | undefined>();
 	for (const [file, contents] of contentByFile) {
-		languages.set(file, getLanguageFromPath(file) ?? detectedCodeLanguage(contents.join("\n"), refresh));
+		languages.set(
+			file,
+			getLanguageFromPath(file) ?? detectedCodeLanguage(contents.join("\n"), refresh),
+		);
 	}
 
 	const validPattern = matchRanges("", details.pattern) !== undefined;

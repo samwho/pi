@@ -18,8 +18,7 @@ const paneId = process.env.HERDR_PANE_ID;
 // pane ID, but must not own that pane's metadata or clear the parent summary
 // when the nested process exits.
 const isNestedPi = Boolean(process.env.PI_SESSION_ID);
-const enabled =
-	process.env.HERDR_ENV === "1" && Boolean(socketEndpoint && paneId) && !isNestedPi;
+const enabled = process.env.HERDR_ENV === "1" && Boolean(socketEndpoint && paneId) && !isNestedPi;
 
 let reportSequence = Date.now() * 1000;
 

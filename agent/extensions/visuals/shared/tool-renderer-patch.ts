@@ -13,10 +13,30 @@ export type ToolRenderContext = {
 	invalidate?: () => void;
 };
 
-export type ToolResult = { content?: Array<{ type?: string; text?: string; mimeType?: string }>; details?: unknown };
-type CallRenderer = (toolName: string, args: unknown, theme: Theme, context: ToolRenderContext) => Component;
-type ResultRenderer = (toolName: string, result: ToolResult, options: { expanded: boolean; isPartial: boolean }, theme: Theme, context: ToolRenderContext) => Component;
-type ResultDecorator = (toolName: string, result: ToolResult, options: { expanded: boolean; isPartial: boolean }, theme: Theme, context: ToolRenderContext) => ToolResult;
+export type ToolResult = {
+	content?: Array<{ type?: string; text?: string; mimeType?: string }>;
+	details?: unknown;
+};
+type CallRenderer = (
+	toolName: string,
+	args: unknown,
+	theme: Theme,
+	context: ToolRenderContext,
+) => Component;
+type ResultRenderer = (
+	toolName: string,
+	result: ToolResult,
+	options: { expanded: boolean; isPartial: boolean },
+	theme: Theme,
+	context: ToolRenderContext,
+) => Component;
+type ResultDecorator = (
+	toolName: string,
+	result: ToolResult,
+	options: { expanded: boolean; isPartial: boolean },
+	theme: Theme,
+	context: ToolRenderContext,
+) => ToolResult;
 type ToolExecutionPrototype = Record<string | symbol, unknown>;
 type InternalToolExecution = { toolName?: unknown };
 
@@ -34,7 +54,10 @@ type PatchState = {
 
 const PATCH = Symbol.for("pi.local-tool-renderer.patch");
 
-function registeredRendererFor(state: PatchState, toolName: string): RegisteredRenderer | undefined {
+function registeredRendererFor(
+	state: PatchState,
+	toolName: string,
+): RegisteredRenderer | undefined {
 	const exact = state.renderers.get(toolName);
 	if (exact) return exact;
 	for (const [pattern, renderer] of state.renderers) {
@@ -48,7 +71,10 @@ function registeredRendererFor(state: PatchState, toolName: string): RegisteredR
  * replacing their definitions. One dispatcher is shared by every local
  * renderer, avoiding stacked prototype patches and reload-order dependence.
  */
-export function registerToolRenderer(toolNames: Iterable<string>, renderer: RegisteredRenderer): void {
+export function registerToolRenderer(
+	toolNames: Iterable<string>,
+	renderer: RegisteredRenderer,
+): void {
 	const prototype = ToolExecutionComponent.prototype as unknown as ToolExecutionPrototype;
 	let state = prototype[PATCH] as PatchState | undefined;
 
@@ -61,7 +87,9 @@ export function registerToolRenderer(toolNames: Iterable<string>, renderer: Regi
 			typeof originalResultRenderer !== "function" ||
 			typeof originalRenderShell !== "function"
 		) {
-			console.warn("local tool renderer: Pi's tool renderer API is unavailable; using the default renderer.");
+			console.warn(
+				"local tool renderer: Pi's tool renderer API is unavailable; using the default renderer.",
+			);
 			return;
 		}
 
@@ -79,36 +107,61 @@ export function registerToolRenderer(toolNames: Iterable<string>, renderer: Regi
 	// helper gains new capabilities. Refresh every dispatcher so wildcard
 	// renderers and decorators also work without restarting Pi.
 	state.decorators ??= new Map();
-	prototype.getRenderShell = function(this: InternalToolExecution): unknown {
-		return registeredRendererFor(state!, String(this.toolName)) ? "self" : state!.originalRenderShell.call(this);
+	prototype.getRenderShell = function (this: InternalToolExecution): unknown {
+		return registeredRendererFor(state, String(this.toolName))
+			? "self"
+			: state.originalRenderShell.call(this);
 	};
-	prototype.getCallRenderer = function(this: InternalToolExecution): unknown {
+	prototype.getCallRenderer = function (this: InternalToolExecution): unknown {
 		const toolName = String(this.toolName);
-		const registered = registeredRendererFor(state!, toolName);
+		const registered = registeredRendererFor(state, toolName);
 		return registered
-			? ((args: unknown, theme: Theme, context: ToolRenderContext) => registered.renderCall(toolName, args, theme, context))
-			: state!.originalCallRenderer.call(this);
+			? (args: unknown, theme: Theme, context: ToolRenderContext) =>
+					registered.renderCall(toolName, args, theme, context)
+			: state.originalCallRenderer.call(this);
 	};
-	prototype.getResultRenderer = function(this: InternalToolExecution): unknown {
+	prototype.getResultRenderer = function (this: InternalToolExecution): unknown {
 		const toolName = String(this.toolName);
-		const registered = registeredRendererFor(state!, toolName);
+		const registered = registeredRendererFor(state, toolName);
 		const resultRenderer = registered
-			? ((result: ToolResult, options: { expanded: boolean; isPartial: boolean }, theme: Theme, context: ToolRenderContext) => registered.renderResult(toolName, result, options, theme, context))
-			: state!.originalResultRenderer.call(this);
-		const decorator = state!.decorators.get(toolName);
+			? (
+					result: ToolResult,
+					options: { expanded: boolean; isPartial: boolean },
+					theme: Theme,
+					context: ToolRenderContext,
+				) => registered.renderResult(toolName, result, options, theme, context)
+			: state.originalResultRenderer.call(this);
+		const decorator = state.decorators.get(toolName);
 		if (!decorator || typeof resultRenderer !== "function") return resultRenderer;
-		return (result: ToolResult, options: { expanded: boolean; isPartial: boolean }, theme: Theme, context: ToolRenderContext) =>
-			(resultRenderer as (...args: unknown[]) => unknown)(decorator(toolName, result, options, theme, context), options, theme, context);
+		return (
+			result: ToolResult,
+			options: { expanded: boolean; isPartial: boolean },
+			theme: Theme,
+			context: ToolRenderContext,
+		) =>
+			(resultRenderer as (...args: unknown[]) => unknown)(
+				decorator(toolName, result, options, theme, context),
+				options,
+				theme,
+				context,
+			);
 	};
 	for (const toolName of toolNames) state.renderers.set(toolName, renderer);
 }
 
 /** Decorate display-only result data before an existing tool renderer sees it. */
-export function registerToolResultDecorator(toolNames: Iterable<string>, decorator: ResultDecorator): void {
+export function registerToolResultDecorator(
+	toolNames: Iterable<string>,
+	decorator: ResultDecorator,
+): void {
 	// Ensure the shared dispatcher exists without claiming any tool names.
 	registerToolRenderer([], {
-		renderCall: () => { throw new Error("unreachable"); },
-		renderResult: () => { throw new Error("unreachable"); },
+		renderCall: () => {
+			throw new Error("unreachable");
+		},
+		renderResult: () => {
+			throw new Error("unreachable");
+		},
 	});
 	const prototype = ToolExecutionComponent.prototype as unknown as ToolExecutionPrototype;
 	const state = prototype[PATCH] as PatchState | undefined;

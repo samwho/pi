@@ -1,13 +1,27 @@
 {
-  "name": "pi-local-extensions",
-  "private": true,
-  "type": "module",
-  "dependencies": {
-    "@vscode/vscode-languagedetection": "^1.0.23",
-    "prettier": "^3.9.9"
-  },
-  "devDependencies": {
-    "@types/node": "^22.20.3",
-    "typescript": "^5.9.3"
-  }
+	"name": "pi-local-extensions",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"format": "oxfmt .",
+		"format:check": "oxfmt --check .",
+		"lint": "oxlint . --type-aware --type-check --tsconfig tsconfig.json --deny-warnings",
+		"typecheck": "tsc --noEmit -p tsconfig.json",
+		"test": "vitest run visuals --config visuals/vitest.config.ts",
+		"bench:render": "vitest bench visuals/rendering.bench.ts --config visuals/vitest.config.ts",
+		"check": "npm run format:check && npm run lint && npm run typecheck && npm run test"
+	},
+	"dependencies": {
+		"@shikijs/cli": "^4.4.3",
+		"@vscode/vscode-languagedetection": "^1.0.23",
+		"diff": "^8.0.4",
+		"prettier": "^3.9.9",
+		"shiki": "^4.4.3"
+	},
+	"devDependencies": {
+		"@types/node": "^22.20.3",
+		"oxlint-tsgolint": "^7.0.2003",
+		"typescript": "^5.9.3",
+		"vitest": "^4.1.11"
+	}
 }

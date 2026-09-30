@@ -59,8 +59,12 @@ function scan(text: string, signal?: AbortSignal): Promise<Finding[]> {
 
 		let stdout = "";
 		let stderr = "";
-		child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf8"); });
-		child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString("utf8"); });
+		child.stdout.on("data", (chunk: Buffer) => {
+			stdout += chunk.toString("utf8");
+		});
+		child.stderr.on("data", (chunk: Buffer) => {
+			stderr += chunk.toString("utf8");
+		});
 		child.on("error", reject);
 		// A scanner that exits early closes stdin before this process can finish
 		// writing. Handle that expected EPIPE instead of crashing Pi.
@@ -85,11 +89,15 @@ function scan(text: string, signal?: AbortSignal): Promise<Finding[]> {
 
 function offsetAt(lines: string[], line: number, column: number): number {
 	let offset = 0;
-	for (let index = 0; index < line - 1; index++) offset += lines[index]!.length + 1;
+	for (let index = 0; index < line - 1; index++) offset += lines[index].length + 1;
 	return offset + column - 1;
 }
 
-function findingRange(text: string, lines: string[], finding: Finding): { start: number; end: number } {
+function findingRange(
+	text: string,
+	lines: string[],
+	finding: Finding,
+): { start: number; end: number } {
 	const matchStart = offsetAt(lines, finding.StartLine, finding.StartColumn);
 	// Betterleaks' EndColumn is inclusive.
 	const matchEnd = offsetAt(lines, finding.EndLine, finding.EndColumn) + 1;
@@ -105,7 +113,11 @@ function findingRange(text: string, lines: string[], finding: Finding): { start:
 	const lineEnd = offsetAt(lines, finding.EndLine, endLine.length + 1);
 	let bestStart = -1;
 	let bestDistance = Number.POSITIVE_INFINITY;
-	for (let start = text.indexOf(secret, lineStart); start !== -1 && start < lineEnd; start = text.indexOf(secret, start + 1)) {
+	for (
+		let start = text.indexOf(secret, lineStart);
+		start !== -1 && start < lineEnd;
+		start = text.indexOf(secret, start + 1)
+	) {
 		if (start + secret.length > lineEnd) continue;
 		const distance = Math.abs(start - matchStart);
 		if (distance < bestDistance) {
@@ -149,10 +161,12 @@ async function redactContent<T extends { type: string; text?: string }>(
 	signal?: AbortSignal,
 ): Promise<T[]> {
 	try {
-		return await Promise.all(content.map(async (block) => {
-			if (block.type !== "text" || typeof block.text !== "string") return block;
-			return { ...block, text: await redact(block.text, signal) };
-		}));
+		return await Promise.all(
+			content.map(async (block) => {
+				if (block.type !== "text" || typeof block.text !== "string") return block;
+				return { ...block, text: await redact(block.text, signal) };
+			}),
+		);
 	} catch {
 		// Never reveal output when the redactor itself is unavailable. Do not put
 		// the scan error in the result: it can include the text being scanned.
@@ -204,9 +218,8 @@ function collectRedactedLines(
 			const text = stripVTControlCharacters(afterLines[lineIndex] ?? "");
 			lines.push({
 				line: lineIndex + 1,
-				text: text.length > MAX_NOTICE_LINE_LENGTH
-					? `${text.slice(0, MAX_NOTICE_LINE_LENGTH)}…`
-					: text,
+				text:
+					text.length > MAX_NOTICE_LINE_LENGTH ? `${text.slice(0, MAX_NOTICE_LINE_LENGTH)}…` : text,
 			});
 		}
 	}
@@ -251,14 +264,14 @@ export default function (pi: ExtensionAPI): void {
 		ctx.ui.setStatus("secret-redactor", "secret redaction: active");
 	});
 
-	// Do not replace built-in tools here. Extensions such as pi-facelift wrap
+	// Do not replace built-in tools here. The local visuals extension wraps
 	// them to attach custom renderers and metadata; registering fresh SDK tools
 	// under the same names discards those wrappers. tool_result is middleware,
 	// so it redacts the final result from whichever implementation is active.
 	pi.on("tool_result", async (event, ctx) => {
 		// Search results are provider-produced public web content; skip the
 		// expensive scanner entirely so source-heavy responses stay lightweight.
-		if (event.toolName === "web_search") return;
+		if (event.toolName === "web_search") return undefined;
 
 		try {
 			const originalDetails = serialize(event.details);
@@ -268,10 +281,11 @@ export default function (pi: ExtensionAPI): void {
 			]);
 			const { lines, omittedLines } = collectRedactedLines(event.content, content);
 			const redactedDetails = serialize(details);
-			const detailsRedacted = originalDetails !== undefined
-				&& redactedDetails !== undefined
-				&& originalDetails !== redactedDetails
-				&& redactedDetails !== serialize({ _type: "redactionFailed" });
+			const detailsRedacted =
+				originalDetails !== undefined &&
+				redactedDetails !== undefined &&
+				originalDetails !== redactedDetails &&
+				redactedDetails !== serialize({ _type: "redactionFailed" });
 
 			if (lines.length > 0 || detailsRedacted) {
 				const source = await redact(toolSource(event.toolName, event.input), ctx.signal);

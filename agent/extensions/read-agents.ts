@@ -16,7 +16,9 @@ function isWithinDirectory(directory: string, filePath: string): boolean {
 	const pathFromDirectory = relative(directory, filePath);
 	return (
 		pathFromDirectory.length === 0 ||
-		(!pathFromDirectory.startsWith(`..${sep}`) && pathFromDirectory !== ".." && !isAbsolute(pathFromDirectory))
+		(!pathFromDirectory.startsWith(`..${sep}`) &&
+			pathFromDirectory !== ".." &&
+			!isAbsolute(pathFromDirectory))
 	);
 }
 
@@ -48,7 +50,9 @@ function getAncestorAgentsFiles(cwd: string, targetPath: string): string[] {
 	return candidates.reverse();
 }
 
-function isSessionMessageEntry(entry: SessionEntry): entry is Extract<SessionEntry, { type: "message" }> {
+function isSessionMessageEntry(
+	entry: SessionEntry,
+): entry is Extract<SessionEntry, { type: "message" }> {
 	return entry.type === "message";
 }
 
@@ -122,7 +126,7 @@ export default function (pi: ExtensionAPI) {
 	// competing with them for ownership of the `read` tool name.
 	pi.on("tool_call", async (event, ctx) => {
 		if (!isToolCallEventType("read", event)) {
-			return;
+			return undefined;
 		}
 
 		const targetPath = normalizePath(ctx.cwd, event.input.path);
@@ -140,7 +144,7 @@ export default function (pi: ExtensionAPI) {
 		}
 
 		if (unreadAgentsFiles.length === 0) {
-			return;
+			return undefined;
 		}
 
 		const paths = unreadAgentsFiles.map((path) => `- ${path}`).join("\n");

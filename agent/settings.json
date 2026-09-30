@@ -19,7 +19,6 @@
   "packages": [
     "git:github.com/badlogic/pi-skills",
     "npm:@pi-plugins/usage",
-    "npm:@wierdbytes/pi-facelift",
     "npm:pi-context-view",
     "npm:pi-web-search",
     "git:github.com/mikker/fut"
