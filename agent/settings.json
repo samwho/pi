@@ -20,7 +20,6 @@
     "git:github.com/badlogic/pi-skills",
     "npm:@pi-plugins/usage",
     "npm:pi-context-view",
-    "npm:pi-web-search",
-    "git:github.com/mikker/fut"
+    "npm:pi-web-search"
   ]
 }
