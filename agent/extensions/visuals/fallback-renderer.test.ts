@@ -224,7 +224,7 @@ describe("generic tool styling", () => {
 		expect(detection.size).toBe(0);
 	});
 
-	it("wraps expanded arguments and output at narrow widths without breaking rails", () => {
+	it("wraps expanded arguments but truncates output without adding rows", () => {
 		const args = { url: "https://example.com/" + "path/".repeat(15), nested: { label: "🌍 café" } };
 		const call = renderFallbackCall("chrome-devtools/new_page", args, theme, { expanded: true });
 		const result = renderFallbackResult(
@@ -235,10 +235,32 @@ describe("generic tool styling", () => {
 			{},
 		);
 		for (const width of [40, 80, 120]) {
-			const rows = [...call.render(width), ...result.render(width)];
+			const outputRows = result.render(width);
+			expect(outputRows).toHaveLength(2); // One output line and its footer.
+			const rows = [...call.render(width), ...outputRows];
 			expect(rows.every((row) => visibleWidth(row) <= width)).toBe(true);
 			expect(stripAnsi(rows.join("\n"))).toContain("café");
 		}
+	});
+
+	it.each([
+		{ expanded: false, isPartial: false },
+		{ expanded: true, isPartial: false },
+		{ expanded: false, isPartial: true },
+		{ expanded: true, isPartial: true },
+	])("clips generic output in every expansion/streaming state: %j", (options) => {
+		const source = "🌍 café ".repeat(100) + "HIDDEN_END\nsecond line";
+		const result = { content: [{ type: "text", text: source }] };
+		const component = renderFallbackResult("plain", result, options, theme, {});
+		for (const width of [40, 80, 160]) {
+			const rows = component.render(width);
+			expect(rows).toHaveLength(3);
+			expect(rows.every((row) => visibleWidth(row) <= width)).toBe(true);
+			expect(stripAnsi(rows.join("\n"))).toContain("second line");
+			expect(rows.join("\n")).not.toContain("HIDDEN_END");
+		}
+		expect(component.render(2000).join("\n")).toContain("HIDDEN_END");
+		expect(result.content[0].text).toBe(source);
 	});
 
 	it("uses the same generic MCP frame for live nested codemode calls", () => {

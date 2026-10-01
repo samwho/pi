@@ -2,10 +2,12 @@
 
 Run a real fullscreen Pi session in an isolated tmux server, load the normal
 plugins, and send scroll input at 120 events/second. The default history is
-synthetic: 120 turns, 601 entries, native read/bash and generic MCP snapshot output, codemode scripts and
-nested-call metadata, Markdown, thinking, Unicode, and errors. No model requests
-or tools are executed. Expanded output has a separate render budget because it
-lays out the complete results, not just their previews.
+synthetic: 120 turns, 601 entries, native read/bash, MCP snapshots, evaluated
+functions, console messages and page lists, codemode scripts and nested-call
+metadata, Markdown, thinking, Unicode, and errors. Long lines in both native
+results and script output exercise horizontal truncation. No model requests or
+tools are executed. Expanded output has a separate render budget because it lays
+out the complete results, not just their previews.
 
 ```sh
 mise install

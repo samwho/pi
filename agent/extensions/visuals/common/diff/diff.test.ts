@@ -23,6 +23,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { visibleWidth } from "@earendil-works/pi-tui";
 
 import {
 	__testing,
@@ -135,6 +136,20 @@ describe("renderUnified", () => {
 		expect(plain.split("\n")[0]).not.toBe(ruleLine);
 	});
 
+	it.each([80, 120, 200])("clips long Unicode lines to one row at width %s", async (width) => {
+		const diff = parseDiff(
+			"old 🌍 café ".repeat(100) + "OLD_END\n",
+			"new 🌍 café ".repeat(100) + "NEW_END\n",
+		);
+		const rows = (
+			await renderUnified(diff, undefined, 50, undefined, width, { frameless: true })
+		).split("\n");
+		expect(rows).toHaveLength(2);
+		expect(rows.every((row) => visibleWidth(row) <= width)).toBe(true);
+		expect(rows.join("\n")).not.toContain("OLD_END");
+		expect(rows.join("\n")).not.toContain("NEW_END");
+	});
+
 	it("includes both deletion and addition markers", async () => {
 		const diff = parseDiff("foo\n", "bar\n");
 		const out = await renderUnified(diff, undefined, 50, undefined, 80, { frameless: true });
@@ -214,6 +229,23 @@ describe("renderSplit", () => {
 		const pairedRow = plain.split("\n").find((line) => /hello[\s\S]*world/.test(line));
 		expect(pairedRow, "expected one row carrying both halves side by side").toBeTruthy();
 	});
+
+	it.each([160, 200])(
+		"clips both halves without adding continuation rows at width %s",
+		async (width) => {
+			const diff = parseDiff("old 🌍 café ".repeat(100) + "\n", "new 🌍 café ".repeat(100) + "\n");
+			const rows = (
+				await renderSplit(diff, undefined, 50, undefined, width, {
+					frameless: true,
+					layout: "split",
+				})
+			).split("\n");
+			expect(rows).toHaveLength(1);
+			expect(rows.every((row) => visibleWidth(row) <= width)).toBe(true);
+			expect(stripAnsi(rows[0])).toContain("old 🌍 café");
+			expect(stripAnsi(rows[0])).toContain("new 🌍 café");
+		},
+	);
 
 	it("emits no `│` / `▌` column chrome (GitHub-style layout)", async () => {
 		const diff = parseDiff("alpha\nbeta\n", "alpha\nBETA\n");

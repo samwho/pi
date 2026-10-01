@@ -42,19 +42,43 @@ export function scrollingFixture(cwd, turns = 250) {
 	});
 	for (let turn = 0; turn < turns; turn++) {
 		append({ role: "user", content: `Inspect rendering example ${turn}.`, timestamp });
+		const chromeTools = ["take_snapshot", "evaluate_script", "list_console_messages", "list_pages"];
 		const name =
-			turn % 4 === 2 ? "mcp__chrome-devtools__take_snapshot" : turn % 2 ? "bash" : "read";
+			turn % 4 === 2
+				? `mcp__chrome-devtools__${chromeTools[Math.floor(turn / 4) % chromeTools.length]}`
+				: turn % 2
+					? "bash"
+					: "read";
 		const args =
 			name === "bash"
 				? { command: "printf 'fixture output'", timeout: 10 }
 				: name === "read"
 					? { path: `src/example-${turn}.ts` }
-					: { pageId: 2 };
-		const text = Array.from({ length: 60 }, (_, i) =>
-			name.startsWith("mcp__")
-				? `uid=${turn}_${i} StaticText "Snapshot row ${i} 🌍 café"`
-				: `export const item${i} = ${turn + i}; // 🌍 café`,
-		).join("\n");
+					: name.endsWith("__evaluate_script")
+						? {
+								pageId: 2,
+								function: `async()=>{const title=document.title;return{title,fixtureTurn:${turn}}}`,
+							}
+						: name.endsWith("__list_pages")
+							? {}
+							: { pageId: 2 };
+		const body = Array.from({ length: 60 }, (_, i) => {
+			const longTail = i % 11 === 0 ? " long column".repeat(50) : "";
+			if (name.endsWith("__list_console_messages"))
+				return `msgid=${turn * 100 + i} [${["log", "warn", "error"][i % 3]}] Fixture 🌍 café${longTail} (1 args)`;
+			if (name.endsWith("__list_pages"))
+				return `${i + 1}: Fixture 🌍 café (http://localhost:1111/fixture-${turn}/${i}${longTail.replaceAll(" ", "-")})${i === 0 ? " [selected]" : ""}`;
+			return name.startsWith("mcp__")
+				? `uid=${turn}_${i} StaticText "Snapshot row ${i} 🌍 café${longTail}"`
+				: `export const item${i} = ${turn + i}; // 🌍 café${longTail}`;
+		}).join("\n");
+		const text = name.endsWith("__evaluate_script")
+			? `# evaluate_script response\nScript ran on page and returned:\n\x60\x60\x60json\n${JSON.stringify({ title: "Fixture 🌍 café", turn })}\n\x60\x60\x60`
+			: name.endsWith("__list_console_messages")
+				? `# list_console_messages response\n## Console messages\n${body}`
+				: name.endsWith("__list_pages")
+					? `# list_pages response\n## Pages\n${body}`
+					: body;
 		const nativeId = `tool-${turn}`;
 		const codeId = `codemode-${turn}`;
 		const code = Array.from({ length: 12 }, (_, i) => `text(${i} + "example ${turn}");`).join("\n");
@@ -80,7 +104,7 @@ export function scrollingFixture(cwd, turns = 250) {
 					? { _type: "readFile", filePath: args.path, content: text, offset: 1, lineCount: 60 }
 					: name === "bash"
 						? { _type: "bashResult", text, exitCode: 0, command: args.command }
-						: { server: "chrome-devtools", tool: "take_snapshot" },
+						: { server: "chrome-devtools", tool: name.split("__").at(-1) },
 		});
 		append({
 			role: "toolResult",
@@ -93,7 +117,13 @@ export function scrollingFixture(cwd, turns = 250) {
 				{
 					type: "text",
 					text: JSON.stringify(
-						{ turn, items: Array.from({ length: 15 }, (_, i) => ({ id: i, label: "fixture 🌍" })) },
+						{
+							turn,
+							items: Array.from({ length: 15 }, (_, i) => ({
+								id: i,
+								label: "fixture 🌍 " + "long output ".repeat(45),
+							})),
+						},
 						null,
 						2,
 					),

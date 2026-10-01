@@ -1,5 +1,6 @@
-import { getMarkdownTheme, type ExtensionAPI, type Theme } from "@earendil-works/pi-coding-agent";
-import { Markdown, wrapTextWithAnsi, type Component } from "@earendil-works/pi-tui";
+import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
+import type { Component } from "@earendil-works/pi-tui";
+import { renderClippedMarkdown } from "./shared/clipped-markdown.ts";
 import { DynamicText } from "./shared/dynamic-text.ts";
 import {
 	frameBodyLines,
@@ -36,7 +37,7 @@ function body(theme: Theme, s: Status, line: string, width: number): string {
 	return frameBodyLines(line, s, theme, width, { paddingX: 1 });
 }
 function bodyLines(theme: Theme, s: Status, line: string, width: number): string[] {
-	return wrapTextWithAnsi(line, Math.max(1, width - 2)).map((part) => body(theme, s, part, width));
+	return body(theme, s, line, width).split("\n");
 }
 function bottom(theme: Theme, s: Status, label: string, width: number): string {
 	return label ? frameBottomWithLabel(label, s, theme, width) : sharedFrameBottom(s, theme, width);
@@ -125,11 +126,6 @@ function outputMarkdown(result: ToolResult): string {
 		.trim();
 }
 
-/** Pi's Markdown component renders links, lists, and Shiki-highlighted code fences. */
-function renderMarkdown(markdown: string, width: number): string[] {
-	if (!markdown) return [];
-	return new Markdown(markdown, 0, 0, getMarkdownTheme()).render(Math.max(1, width));
-}
 function resultSummary(details: RecordValue): string {
 	const sources = Array.isArray(details.sources)
 		? details.sources.length
@@ -166,7 +162,7 @@ export function renderResultFor(
 				]
 			: [
 					theme.fg("success", `✓ ${resultSummary(details)}`),
-					...renderMarkdown(raw, Math.max(1, width - 2)),
+					...renderClippedMarkdown(raw, Math.max(1, width - 2)),
 				];
 		return [
 			...lines.flatMap((line) => bodyLines(theme, s, line, width)),

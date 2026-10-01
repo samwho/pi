@@ -5,7 +5,7 @@ import {
 	type ExtensionAPI,
 	type Theme,
 } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
+import { Text, visibleWidth } from "@earendil-works/pi-tui";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import registerCodemode, {
 	renderCall as renderCodemodeCall,
@@ -81,6 +81,38 @@ describe("rendering between TUI redraws", () => {
 		expect(component.render(80)).toBe(first);
 		component.invalidate?.();
 		expect(component.render(80)).not.toBe(first);
+	});
+
+	it("clips native fallback progress output instead of soft-wrapping it", () => {
+		const output = "progress 🌍 ".repeat(100);
+		const original = new Text("\x1b[33m" + output + "\x1b[0m", 0, 0);
+		const component = genericFallback(
+			{ isPartial: true, getTextOutput: () => output },
+			() => original,
+		)!;
+		expect(component.render(40)).toHaveLength(1);
+		expect(visibleWidth(component.render(40)[0])).toBeLessThanOrEqual(40);
+		original.setText("latest update");
+		expect(component.render(40)[0]).toBe("latest update");
+	});
+
+	it("truncates completed and failed web output without losing its Markdown styling", () => {
+		const result = {
+			content: [
+				{ type: "text" as const, text: "**Result** " + "word ".repeat(100) + "HIDDEN_END" },
+			],
+		};
+		for (const failed of [false, true]) {
+			const component = renderWebResult(result, { expanded: true, isPartial: false }, theme, {
+				isError: failed,
+			});
+			for (const width of [40, 80, 160]) {
+				const rows = component.render(width);
+				expect(rows).toHaveLength(3); // Summary/error, one result line, footer.
+				expect(rows.every((row) => visibleWidth(row) <= width)).toBe(true);
+				expect(rows.join("\n")).not.toContain("HIDDEN_END");
+			}
+		}
 	});
 
 	it("caches final search results but not the live searching spinner", () => {

@@ -91,17 +91,58 @@ describe("codemode section previews", () => {
 		expect(stripAnsi(tool.render(100).join("\n"))).toBe(collapsed);
 	});
 
-	it("counts wrapped output rows, not nested tool rows or source lines", () => {
-		const options = { expanded: false, isPartial: false };
-		const source = { content: [{ type: "text", text: "x".repeat(300) }], details: {} };
+	it.each([false, true])(
+		"truncates long output lines without adding rows (expanded=%s)",
+		(expanded) => {
+			const source = {
+				content: [
+					{ type: "text", text: "\x1b[31m" + "🌍 café ".repeat(100) + "HIDDEN_END\x1b[0m" },
+				],
+				details: {},
+			};
+			const cfg = defaultConfig();
+			cfg.previewLines.codemode = 3;
+			saveConfig(cfg);
+			const component = renderResult(source, { expanded, isPartial: false }, theme, {});
+			for (const width of [40, 80, 160]) {
+				const rows = component.render(width);
+				expect(rows).toHaveLength(4); // Summary, header, one output line, footer.
+				expect(rows.every((row) => visibleWidth(row) <= width)).toBe(true);
+				expect(stripAnsi(rows[2])).toMatch(/^││ 🌍 café/);
+				expect(rows.join("\n")).not.toContain("HIDDEN_END");
+				expect(rows.join("\n")).not.toContain("more output rows");
+			}
+			expect(source.content[0].text).toContain("HIDDEN_END");
+		},
+	);
+
+	it("counts only logical output lines regardless of terminal width", () => {
 		const cfg = defaultConfig();
 		cfg.previewLines.codemode = 3;
 		saveConfig(cfg);
-		const full = renderResult(source, { ...options, expanded: true }, theme, {}).render(50);
-		const outputRows = full.length - 3; // Group summary, output header, output footer.
-		const collapsed = renderResult(source, options, theme, {}).render(50);
-		expect(stripAnsi(collapsed.join("\n"))).toContain(`${outputRows - 2} more output rows`);
-		expect(collapsed.every((row) => visibleWidth(row) <= 50)).toBe(true);
+		const source = {
+			content: [
+				{
+					type: "text",
+					text: Array.from({ length: 10 }, (_, i) => `row ${i} ${"x".repeat(300)}`).join("\n"),
+				},
+			],
+		};
+		for (const width of [40, 80, 160]) {
+			const collapsed = renderResult(
+				source,
+				{ expanded: false, isPartial: false },
+				theme,
+				{},
+			).render(width);
+			expect(collapsed).toHaveLength(6);
+			expect(stripAnsi(collapsed.join("\n"))).toContain("8 more output rows");
+			const expanded = renderResult(source, { expanded: true, isPartial: false }, theme, {}).render(
+				width,
+			);
+			expect(expanded).toHaveLength(13);
+			expect(stripAnsi(expanded.join("\n"))).toContain("row 9");
+		}
 	});
 
 	it("honours a one-row output preview and leaves partial calls visible", () => {

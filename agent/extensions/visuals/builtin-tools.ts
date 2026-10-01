@@ -1873,7 +1873,7 @@ export default function registerBuiltinTools(pi: BuiltinToolApi, deps?: BuiltinT
 	//
 	// In "consistent" mode (the default) a single tool call decides one
 	// layout for every diff it shows: split iff every diff fits without
-	// excessive wrapping, otherwise unified for all. This stops the
+	// excessive clipping, otherwise unified for all. This stops the
 	// `Edit 1/2 = split, Edit 2/2 = unified` visual mix you'd otherwise
 	// get when one edit happens to contain very long lines.
 	// ===================================================================
@@ -1925,7 +1925,7 @@ export default function registerBuiltinTools(pi: BuiltinToolApi, deps?: BuiltinT
 				type: "enum",
 				label: "Diff layout",
 				description:
-					"How to lay out write/edit diffs. `consistent` keeps every edit in one tool call on the same layout (split when all fit, unified when any would wrap). The other modes force a specific layout or let each edit decide.",
+					"How to lay out write/edit diffs. `consistent` keeps every edit in one tool call on the same layout (split when all fit, unified when long lines would be heavily clipped). The other modes force a specific layout or let each edit decide.",
 				value: faceliftConfig.diffLayout,
 				options: VALID_DIFF_LAYOUTS,
 				optionLabels: diffLayoutLabels,

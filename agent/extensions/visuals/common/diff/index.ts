@@ -33,6 +33,7 @@
  */
 
 import { extname } from "node:path";
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { loadConfig } from "../../config.ts";
 
 import { codeToANSI } from "@shikijs/cli";
@@ -72,11 +73,11 @@ export type DiffLayout = "split" | "unified";
  * User-facing preference for picking a layout across one tool call:
  *
  *   • `"consistent"` (default) — all diffs in the same call share one
- *     layout: `split` if **every** diff fits without excessive wrapping,
+ *     layout: `split` if **every** diff fits without excessive clipping,
  *     `unified` otherwise. Avoids mixing layouts within a single edit.
- *   • `"split"` — always render side-by-side, even if long lines wrap.
+ *   • `"split"` — always render side-by-side, even if long lines are clipped.
  *   • `"unified"` — always render stacked single-column.
- *   • `"per-edit"` — each diff picks its own layout based on wrap fit
+ *   • `"per-edit"` — each diff picks its own layout based on column fit
  *     (original pi-diff behaviour; can produce mixed layouts in one call).
  */
 export type DiffLayoutPreference = "consistent" | "split" | "unified" | "per-edit";
@@ -91,9 +92,9 @@ export interface DiffRenderOptions {
 	 */
 	frameless?: boolean;
 	/**
-	 * Force a specific layout, bypassing the wrap-fit heuristic. When
+	 * Force a specific layout, bypassing the column-fit heuristic. When
 	 * omitted, `renderSplit` auto-falls back to `renderUnified` for
-	 * diffs that would wrap excessively.
+	 * diffs that would be clipped excessively.
 	 */
 	layout?: DiffLayout;
 }
@@ -206,9 +207,6 @@ const SPLIT_MAX_WRAP_LINES = 8;
 const MAX_HL_CHARS = diffConfig.maxChars;
 const CACHE_LIMIT = diffConfig.cacheLimit;
 const WORD_DIFF_MIN_SIM = 0.15;
-const MAX_WRAP_ROWS_WIDE = 3;
-const MAX_WRAP_ROWS_MED = 2;
-const MAX_WRAP_ROWS_NARROW = 1;
 const DEFAULT_RENDER_WIDTH = 120;
 const MIN_RENDER_WIDTH = 40;
 
@@ -276,7 +274,6 @@ let DEFAULT_DIFF_COLORS: DiffColors = { fgAdd: FG_ADD, fgDel: FG_DEL, fgCtx: FG_
 
 const ESC_RE = "\u001b";
 const ANSI_RE = new RegExp(`${ESC_RE}\\[[0-9;]*m`, "g");
-const ANSI_CAPTURE_RE = new RegExp(`${ESC_RE}\\[([^m]*)m`, "g");
 const ANSI_PARAM_CAPTURE_RE = new RegExp(`${ESC_RE}\\[([0-9;]*)m`, "g");
 
 let THEME: string = diffConfig.theme;
@@ -701,7 +698,7 @@ export async function hlBlock(code: string, language: string | undefined): Promi
 }
 
 // ---------------------------------------------------------------------------
-// Render utilities (ANSI-aware width, wrapping, contrast fix)
+// Render utilities (ANSI-aware width, clipping, contrast fix)
 // ---------------------------------------------------------------------------
 
 function strip(s: string): string {
@@ -710,12 +707,6 @@ function strip(s: string): string {
 
 function tabs(s: string): string {
 	return s.replace(/\t/g, "  ");
-}
-
-function adaptiveWrapRows(width: number): number {
-	if (width >= 180) return MAX_WRAP_ROWS_WIDE;
-	if (width >= 120) return MAX_WRAP_ROWS_MED;
-	return MAX_WRAP_ROWS_NARROW;
 }
 
 function fit(content: string, width: number): string {
@@ -741,26 +732,6 @@ function fit(content: string, width: number): string {
 		: `${content.slice(0, index)}${RST}`;
 }
 
-function ansiState(s: string): string {
-	let fg = "";
-	let bg = "";
-	for (const match of s.matchAll(ANSI_CAPTURE_RE)) {
-		const params = match[1] ?? "";
-		const seq = match[0] ?? "";
-		if (params === "0") {
-			fg = "";
-			bg = "";
-		} else if (params === "39") {
-			fg = "";
-		} else if (params.startsWith("38;")) {
-			fg = seq;
-		} else if (params.startsWith("48;")) {
-			bg = seq;
-		}
-	}
-	return bg + fg;
-}
-
 function isLowContrastShikiFg(params: string): boolean {
 	if (params === "30" || params === "90") return true;
 	if (params === "38;5;0" || params === "38;5;8") return true;
@@ -778,68 +749,9 @@ function normalizeShikiContrast(ansi: string): string {
 	);
 }
 
-function wrapAnsi(s: string, w: number, maxRows: number, fillBg = ""): string[] {
-	if (w <= 0) return [""];
-	const plain = strip(s);
-	if (plain.length <= w) {
-		const pad = w - plain.length;
-		return pad > 0 ? [s + fillBg + " ".repeat(pad) + (fillBg ? RST : "")] : [s];
-	}
-	const rows: string[] = [];
-	let row = "";
-	let vis = 0;
-	let i = 0;
-	let onLastRow = false;
-	let effW = w;
-	while (i < s.length) {
-		if (!onLastRow && rows.length >= maxRows - 1) {
-			onLastRow = true;
-			effW = w > 2 ? w - 1 : w;
-		}
-		if (s[i] === "\x1b") {
-			const end = s.indexOf("m", i);
-			if (end !== -1) {
-				row += s.slice(i, end + 1);
-				i = end + 1;
-				continue;
-			}
-		}
-		if (vis >= effW) {
-			if (onLastRow) {
-				let hasMore = false;
-				for (let j = i; j < s.length; j++) {
-					if (s[j] === "\x1b") {
-						const e2 = s.indexOf("m", j);
-						if (e2 !== -1) {
-							j = e2;
-							continue;
-						}
-					}
-					hasMore = true;
-					break;
-				}
-				if (hasMore && w > 2) row += `${RST}${FG_DIM}›${RST}`;
-				else row += fillBg + " ".repeat(Math.max(0, w - vis)) + RST;
-				rows.push(row);
-				return rows;
-			}
-			const state = ansiState(row);
-			rows.push(row + RST);
-			row = state + fillBg;
-			vis = 0;
-			if (rows.length >= maxRows - 1) {
-				onLastRow = true;
-				effW = w > 2 ? w - 1 : w;
-			}
-		}
-		row += s[i];
-		vis++;
-		i++;
-	}
-	if (row.length > 0 || rows.length === 0) {
-		rows.push(row + fillBg + " ".repeat(Math.max(0, w - vis)) + RST);
-	}
-	return rows;
+function clipAnsi(text: string, width: number, fillBg: string): string {
+	const clipped = truncateToWidth(text, width, "");
+	return clipped + fillBg + " ".repeat(Math.max(0, width - visibleWidth(clipped))) + RST;
 }
 
 function lnumStr(n: number | null, w: number, fg: string = FG_LNUM): string {
@@ -888,7 +800,7 @@ function shouldUseSplit(diff: ParsedDiff, width: number, maxRows: number): boole
  * Public sibling of `shouldUseSplit` — wrappers (facelift, etc.) call
  * this for each diff in a multi-edit tool call to decide whether to
  * force a single layout across all of them (e.g., fall every edit back
- * to unified when one of them would wrap excessively in split).
+ * to unified when one of them would be clipped excessively in split).
  */
 export function canRenderSplit(diff: ParsedDiff, width: number, maxLines: number): boolean {
 	return shouldUseSplit(diff, Math.max(MIN_RENDER_WIDTH, width), maxLines);
@@ -1038,7 +950,7 @@ export async function renderUnified(
 	// Optional faint rule at top/bottom when used standalone (not framed).
 	if (!options.frameless) out.push(rule(tw));
 
-	/** Emit one logical source line as 1+ visual rows (wrap continuations).
+	/** Emit one right-truncated row per logical source line.
 	 *  Gutter pattern: `<lead 1><num nw><gap 1><sign 1><gap 2>` = nw + 5 cols.
 	 *  Everything sits on `rowBg` so the tint covers the row end-to-end. */
 	const emitRow = (
@@ -1050,12 +962,7 @@ export async function renderUnified(
 	): void => {
 		const numStr = num !== null ? String(num).padStart(nw) : " ".repeat(nw);
 		const gutter = `${rowBg} ${numFg}${numStr}${RST}${rowBg} ${BOLD}${numFg}${sign}${RST}${rowBg}  `;
-		const contGutter = `${rowBg}${" ".repeat(gutterW)}`;
-		const rows = wrapAnsi(tabs(body), cw, adaptiveWrapRows(tw), rowBg);
-		out.push(`${gutter}${rows[0]}${RST}`);
-		for (let r = 1; r < rows.length; r++) {
-			out.push(`${contGutter}${rows[r]}${RST}`);
-		}
+		out.push(`${gutter}${clipAnsi(tabs(body), cw, rowBg)}${RST}`);
 	};
 
 	while (idx < visible.length) {
@@ -1129,7 +1036,7 @@ export async function renderUnified(
 
 /**
  * Side-by-side diff view. Auto-falls back to `renderUnified` when the
- * terminal is too narrow or too many lines would wrap. Set `options.frameless`
+ * terminal is too narrow or too many lines would be clipped. Set `options.frameless`
  * to `true` to omit the leading/trailing rule lines.
  */
 export async function renderSplit(
@@ -1144,9 +1051,9 @@ export async function renderSplit(
 	// Layout selection:
 	//   • `options.layout === "unified"` — caller explicitly wants stacked.
 	//   • `options.layout === "split"` — caller explicitly wants side-by-side,
-	//     even if long lines would wrap. Skip the heuristic.
+	//     even if long lines would be clipped. Skip the heuristic.
 	//   • otherwise (undefined) — auto: fall back to unified when the diff
-	//     would wrap excessively in split.
+	//     would be clipped excessively in split.
 	if (options.layout === "unified") {
 		return renderUnified(diff, language, maxLines, colors, tw, options);
 	}
@@ -1216,16 +1123,13 @@ export async function renderSplit(
 	let rI = 0;
 	const out: string[] = [];
 
-	/** A full half-row painted with BG_EMPTY — used as filler when one
-	 *  side has fewer wrapped rows than the other, and for the empty side
+	/** A full half-row painted with BG_EMPTY — used for the empty side
 	 *  of unpaired del/add rows. Stays on the neutral chrome gray so
 	 *  "this line doesn't exist on this side" reads visually distinct from
 	 *  ctx rows (which sit on the terminal default). */
 	const emptyHalf = `${BG_EMPTY}${" ".repeat(half)}${RST}`;
 
-	/** Build the per-row pieces of one half (left or right). Returns an
-	 *  array of `half`-wide visual rows: row 0 has the line number + sign,
-	 *  subsequent rows are wrap continuations (blank gutter, tint preserved). */
+	/** Build one right-truncated, `half`-wide row with line number + sign. */
 	const buildHalf = (
 		line: DiffLine | null,
 		hl: string,
@@ -1276,16 +1180,10 @@ export async function renderSplit(
 		// Gutter pieces are emitted as self-contained segments (each ends in
 		// RST then re-applies rowBg) so the body row can carry its own bg
 		// codes without conflict. The row as a whole ends with the final RST
-		// emitted by wrapAnsi on the body padding.
+		// emitted by clipAnsi on the body padding.
 		// Layout: `<lead 1><num nw><gap 1><sign 1><gap 2>` = nw + 5 cols.
 		const gutter = `${rowBg} ${numFg}${numStr}${RST}${rowBg} ${BOLD}${numFg}${sign}${RST}${rowBg}  `;
-		const continuation = `${rowBg}${" ".repeat(gutterW)}`;
-
-		const bodyRows = wrapAnsi(tabs(body), cw, adaptiveWrapRows(tw), rowBg);
-		return bodyRows.map((rowText, i) => {
-			const prefix = i === 0 ? gutter : continuation;
-			return `${prefix}${rowText}${RST}`;
-		});
+		return [`${gutter}${clipAnsi(tabs(body), cw, rowBg)}${RST}`];
 	};
 
 	for (const r of vis) {

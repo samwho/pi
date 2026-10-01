@@ -12,7 +12,7 @@ import {
 	wrapTextWithAnsi,
 	type Component,
 } from "@earendil-works/pi-tui";
-import { format } from "prettier";
+import { formattedCode as formattedScript } from "./shared/code-format.ts";
 import { previewLineLimit } from "./config.ts";
 import { detectedCodeLanguage } from "./shared/code-language.ts";
 import { DynamicText } from "./shared/dynamic-text.ts";
@@ -97,8 +97,8 @@ function installModeBridge(): void {
 }
 
 function linesInFrame(line: string, theme: Theme, status: FrameStatus, width: number): string[] {
-	return wrapTextWithAnsi(line, Math.max(1, width - 3)).map((part) =>
-		frameBodyLines(part, status, theme, width, { paddingX: 1 }),
+	return frameBodyLines(line.replace(/\t/g, "   "), status, theme, width, { paddingX: 1 }).split(
+		"\n",
 	);
 }
 
@@ -142,28 +142,6 @@ function codeLines(code: string, theme: Theme, width: number): string[] {
 			return `${theme.fg("dim", gutter)} ${part}`;
 		}),
 	);
-}
-
-// Formatting is display-only: never change the source sent to the codemode tool.
-// Cache the promise because Pi may recreate a call component on each redraw.
-const formattedScripts = new Map<string, { promise: Promise<string>; value?: string }>();
-function formattedScript(source: string): { promise: Promise<string>; value?: string } {
-	let entry = formattedScripts.get(source);
-	if (!entry) {
-		entry = {
-			promise: format(source, { parser: "babel", printWidth: 80, tabWidth: 2 }).then(
-				(formatted) => formatted.trimEnd(),
-				() => source,
-			),
-		};
-		const current = entry;
-		void current.promise.then((value) => {
-			current.value = value;
-		});
-		formattedScripts.set(source, current);
-		if (formattedScripts.size > 32) formattedScripts.delete(formattedScripts.keys().next().value!);
-	}
-	return entry;
 }
 
 function callStatus(call: CodemodeCall): FrameStatus {

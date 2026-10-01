@@ -1,4 +1,9 @@
-import { highlightCode, type ExtensionAPI, type Theme } from "@earendil-works/pi-coding-agent";
+import {
+	highlightCode,
+	type ExtensionAPI,
+	type Theme,
+	type ThemeColor,
+} from "@earendil-works/pi-coding-agent";
 import { wrapTextWithAnsi, type Component } from "@earendil-works/pi-tui";
 import {
 	frameBodyLines,
@@ -25,10 +30,16 @@ function valueText(value: unknown, expanded: boolean): string {
 	}
 }
 
-function bodyRows(text: string, status: FrameStatus, theme: Theme, width: number): string[] {
-	return wrapTextWithAnsi(text.replace(/\t/g, "   "), Math.max(1, width - 2)).map((line) =>
-		frameBodyLines(line, status, theme, width, { paddingX: 1 }),
-	);
+function bodyRows(
+	text: string,
+	status: FrameStatus,
+	theme: Theme,
+	width: number,
+	wrap = false,
+): string[] {
+	const source = text.replace(/\t/g, "   ");
+	const lines = wrap ? wrapTextWithAnsi(source, Math.max(1, width - 2)) : source.split("\n");
+	return lines.map((line) => frameBodyLines(line, status, theme, width, { paddingX: 1 }));
 }
 
 export function renderFallbackCall(
@@ -64,7 +75,13 @@ export function renderFallbackCall(
 			header,
 			...(expanded
 				? entries.flatMap(([key, value]) =>
-						bodyRows(theme.fg("muted", `${key}: ${valueText(value, true)}`), status, theme, width),
+						bodyRows(
+							theme.fg("muted", `${key}: ${valueText(value, true)}`),
+							status,
+							theme,
+							width,
+							true,
+						),
 					)
 				: []),
 			...(context.hasResult === false
@@ -98,12 +115,16 @@ function highlighting(source: string, context: ToolRenderContext): HighlightStat
 	return state;
 }
 
+export type ToolOutputRow = string | { text: string; color?: ThemeColor };
+export type ToolResultView = { lines: ToolOutputRow[]; summary?: string; language?: string };
+
 export function renderFallbackResult(
 	toolName: string,
 	result: ToolResult,
 	options: { expanded: boolean; isPartial: boolean },
 	theme: Theme,
 	context: ToolRenderContext,
+	view?: ToolResultView,
 ): Component {
 	const output =
 		context.getTextOutput?.(result) ??
@@ -117,22 +138,42 @@ export function renderFallbackResult(
 			)
 			.join("\n");
 	const status = getFrameStatus({ ...context, isPartial: options.isPartial });
-	const highlighted = options.isPartial ? undefined : highlighting(output, context);
+	const highlighted = options.isPartial || view ? undefined : highlighting(output, context);
 	const details = result.details as { fullOutputPath?: unknown } | undefined;
 	const fullOutputPath =
 		typeof details?.fullOutputPath === "string" ? details.fullOutputPath : undefined;
 	return new DynamicText((width) => {
-		let lines = output ? output.replace(/\r\n?/g, "\n").split("\n") : [];
-		if (highlighted?.language) {
+		const language = view?.language ?? highlighted?.language;
+		let lines = view
+			? view.lines.flatMap((row) => {
+					const text = typeof row === "string" ? row : row.text;
+					const rowLines = text.replace(/\r\n?/g, "\n").split("\n");
+					return language
+						? rowLines
+						: rowLines.map((line) =>
+								theme.fg(
+									typeof row === "string" ? "toolOutput" : (row.color ?? "toolOutput"),
+									line,
+								),
+							);
+				})
+			: output
+				? output.replace(/\r\n?/g, "\n").split("\n")
+				: [];
+		if (language) {
 			try {
-				lines = highlightCode(lines.join("\n"), highlighted.language);
+				lines = highlightCode(lines.join("\n"), language);
 			} catch {
 				/* Unknown languages stay readable as plain text. */
 			}
-		} else {
+		} else if (!view) {
 			lines = lines.map((line) => theme.fg(context.isError ? "error" : "toolOutput", line));
 		}
-		const label = options.isPartial ? "running" : context.isError ? "✗ failed" : "✓ complete";
+		const label = options.isPartial
+			? "running"
+			: context.isError
+				? "✗ failed"
+				: `✓ complete${view?.summary ? ` · ${view.summary}` : ""}`;
 		const framed = [
 			...lines.flatMap((line) => bodyRows(line, status, theme, width)),
 			frameBottomWithLabel(label, status, theme, width),

@@ -58,7 +58,14 @@ export function genericFallback(
 ): Component | undefined {
 	const fallback = original.call(instance);
 	const output = instance.getTextOutput?.() ?? "";
-	if (!fallback || !output || instance.isPartial) return fallback;
+	if (!fallback || !output) return fallback;
+	if (instance.isPartial) {
+		// Retain native progress styling, but bypass Text's soft wrapping.
+		const text = fallback as Component & { text?: string; getText?: () => string };
+		return new DynamicText(
+			() => text.getText?.() ?? text.text ?? instance.getTextOutput?.() ?? output,
+		);
+	}
 	const hasAnsi = /\x1b(?:\[|\])/.test(output);
 
 	let component: DynamicText | undefined;
