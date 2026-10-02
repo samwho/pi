@@ -7,7 +7,7 @@
 		"format:check": "oxfmt --check .",
 		"lint": "oxlint . --type-aware --type-check --tsconfig tsconfig.json --deny-warnings",
 		"typecheck": "tsc --noEmit -p tsconfig.json",
-		"test": "vitest run visuals --config visuals/vitest.config.ts",
+		"test": "vitest run visuals read-agents --config visuals/vitest.config.ts",
 		"bench:render": "vitest bench visuals/rendering.bench.ts --config visuals/vitest.config.ts",
 		"test:scroll": "node visuals/perf/run.mjs",
 		"profile:scroll": "node visuals/perf/run.mjs --profile",

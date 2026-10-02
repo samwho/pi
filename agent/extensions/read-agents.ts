@@ -1,6 +1,6 @@
 import { constants } from "node:fs";
 import { access } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { isReadToolResult, isToolCallEventType } from "@earendil-works/pi-coding-agent";
@@ -109,8 +109,32 @@ async function fileExists(filePath: string): Promise<boolean> {
 	}
 }
 
+interface PendingAgentsRead {
+	path: string;
+	parentToolCallId?: string;
+	done: Promise<boolean>;
+	finish: (success: boolean) => void;
+}
+
+async function waitForRead(done: Promise<boolean>, signal?: AbortSignal): Promise<boolean> {
+	if (!signal) return done;
+	if (signal.aborted) return false;
+
+	let onAbort = () => {};
+	const aborted = new Promise<boolean>((complete) => {
+		onAbort = () => complete(false);
+		signal.addEventListener("abort", onAbort, { once: true });
+	});
+	try {
+		return await Promise.race([done, aborted]);
+	} finally {
+		signal.removeEventListener("abort", onAbort);
+	}
+}
+
 export default function (pi: ExtensionAPI) {
 	const completedReadPaths = new Set<string>();
+	const pendingAgentsReads = new Map<string, PendingAgentsRead>();
 
 	// Context files are already included in Pi's initial system prompt. Record
 	// those paths before the first tool call so the agent is not asked to read
@@ -130,15 +154,44 @@ export default function (pi: ExtensionAPI) {
 		}
 
 		const targetPath = normalizePath(ctx.cwd, event.input.path);
+		// Register before yielding, so a parallel sibling can find this read
+		// regardless of its position in a Promise.all batch. Only reads that
+		// reached tool_call are eligible: queued sequential calls cannot run
+		// while this gate is waiting for them.
+		if (basename(targetPath) === AGENTS_FILE_NAME) {
+			let finish!: PendingAgentsRead["finish"];
+			const done = new Promise<boolean>((complete) => {
+				finish = complete;
+			});
+			pendingAgentsReads.set(event.toolCallId, {
+				path: targetPath,
+				parentToolCallId: event.parentToolCallId,
+				done,
+				finish,
+			});
+		}
+
 		const sessionReadPaths = getReadPaths(ctx.sessionManager.getBranch(), ctx.cwd);
 		const knownReadPaths = new Set([...sessionReadPaths, ...completedReadPaths]);
 		const unreadAgentsFiles: string[] = [];
 
 		for (const agentsPath of getAncestorAgentsFiles(ctx.cwd, targetPath)) {
-			if (knownReadPaths.has(agentsPath)) {
+			if (knownReadPaths.has(agentsPath) || completedReadPaths.has(agentsPath)) {
 				continue;
 			}
-			if (await fileExists(agentsPath)) {
+			if (!(await fileExists(agentsPath))) continue;
+
+			// Filesystem checks yield to the sibling calls. Recheck completion,
+			// then wait only for an instructions read under the same parent
+			// tool (or another direct call), not an unrelated codemode script.
+			if (completedReadPaths.has(agentsPath)) continue;
+			const siblings = [...pendingAgentsReads.values()].filter(
+				(read) => read.path === agentsPath && read.parentToolCallId === event.parentToolCallId,
+			);
+			const successes = await Promise.all(
+				siblings.map((read) => waitForRead(read.done, ctx.signal)),
+			);
+			if (!successes.some(Boolean) && !completedReadPaths.has(agentsPath)) {
 				unreadAgentsFiles.push(agentsPath);
 			}
 		}
@@ -164,8 +217,25 @@ export default function (pi: ExtensionAPI) {
 		}
 
 		const path = event.input.path;
-		if (typeof path === "string") {
+		if (typeof path === "string" && !pendingAgentsReads.has(event.toolCallId)) {
 			completedReadPaths.add(normalizePath(ctx.cwd, path));
 		}
 	});
+
+	// Unlike tool_result, this also fires for blocked calls and observes the
+	// final outcome after all result-transforming extensions have run.
+	pi.on("tool_execution_end", (event) => {
+		const read = pendingAgentsReads.get(event.toolCallId);
+		if (!read) return;
+		pendingAgentsReads.delete(event.toolCallId);
+		if (!event.isError) completedReadPaths.add(read.path);
+		read.finish(!event.isError);
+	});
+
+	const clearPendingReads = () => {
+		for (const read of pendingAgentsReads.values()) read.finish(false);
+		pendingAgentsReads.clear();
+	};
+	pi.on("agent_end", clearPendingReads);
+	pi.on("session_shutdown", clearPendingReads);
 }
