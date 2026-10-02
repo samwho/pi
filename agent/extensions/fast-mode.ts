@@ -19,6 +19,7 @@ const SUPPORTED_MODELS = new Set([
 	"openai/gpt-5.6-luna",
 	"openai/gpt-6-luna",
 	"openai/gpt-6-sol",
+	"openai/gpt-6.1-sol",
 	"openai-codex/gpt-5.4",
 	"openai-codex/gpt-5.4-mini",
 	"openai-codex/gpt-5.5",
@@ -28,6 +29,7 @@ const SUPPORTED_MODELS = new Set([
 	"openai-codex/gpt-5.6-luna",
 	"openai-codex/gpt-6-luna",
 	"openai-codex/gpt-6-sol",
+	"openai-codex/gpt-6.1-sol",
 ]);
 
 type JsonObject = Record<string, unknown>;
