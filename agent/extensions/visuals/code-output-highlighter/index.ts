@@ -17,6 +17,7 @@ import {
 } from "../shared/tool-renderer-patch.ts";
 
 const PATCH = Symbol.for("pi.local-code-output-highlighter.patch");
+const grepRefreshCallbacks = new WeakMap<object, () => void>();
 
 type InternalToolExecution = {
 	expanded?: boolean;
@@ -224,11 +225,18 @@ function highlightGrepResult(
 		contentByFile.set(line.file, contents);
 	}
 
-	const refresh = () => {
-		delete context.state?._gk;
-		delete context.state?._gt;
-		context.invalidate?.();
-	};
+	// Redraws must reuse one listener: resolving one file otherwise registers
+	// fresh callbacks for every other pending file, multiplying subsequent redraws.
+	const refreshKey = context.state ?? result;
+	let refresh = grepRefreshCallbacks.get(refreshKey);
+	if (!refresh) {
+		refresh = () => {
+			delete context.state?._gk;
+			delete context.state?._gt;
+			context.invalidate?.();
+		};
+		grepRefreshCallbacks.set(refreshKey, refresh);
+	}
 	const languages = new Map<string, string | undefined>();
 	for (const [file, contents] of contentByFile) {
 		languages.set(
