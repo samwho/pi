@@ -22,7 +22,8 @@
  * specific text fragments).
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import * as Diff from "diff";
 import { visibleWidth } from "@earendil-works/pi-tui";
 
 import {
@@ -36,6 +37,8 @@ import {
 	resolveDiffColors,
 	summarize,
 } from "./index.ts";
+
+vi.mock("diff", { spy: true });
 
 // Make sure the palette is initialised (mirrors the extension boot path).
 applyDiffPalette();
@@ -310,6 +313,62 @@ describe("frame-friendly output (no BG leak past the trailing newline)", () => {
 		expect(rst).toBe("\x1b[0m");
 		expect(bgBase).toMatch(/\x1b\[48;2;30;40;60m/);
 	});
+});
+
+describe("bounded word diffs", () => {
+	it("skips word tokenization for source-file-sized JSON lines", () => {
+		const spy = vi.spyOn(Diff, "diffWords").mockClear();
+		try {
+			const oldText = JSON.stringify({ source: "old source; ".repeat(16000) });
+			const newText = JSON.stringify({ source: "new source; ".repeat(16000) });
+			expect(__testing.wordDiffAnalysis(oldText, newText)).toEqual({
+				similarity: 0,
+				oldRanges: [],
+				newRanges: [],
+			});
+			expect(__testing.plainWordDiff(oldText, newText)).toEqual({ old: oldText, new: newText });
+			expect(spy).not.toHaveBeenCalled();
+		} finally {
+			spy.mockRestore();
+		}
+	});
+
+	it("abandons excessive edit distance even below the size cap", () => {
+		const oldText = Array.from({ length: 300 }, (_, i) => `old${i}`).join(" ");
+		const newText = Array.from({ length: 300 }, (_, i) => `new${i}`).join(" ");
+		expect(__testing.wordDiffAnalysis(oldText, newText).similarity).toBe(0);
+		expect(__testing.plainWordDiff(oldText, newText)).toEqual({ old: oldText, new: newText });
+	});
+
+	it("falls back when the diff library exhausts its time budget", () => {
+		const clock = vi.spyOn(Date, "now").mockReturnValueOnce(0).mockReturnValue(100);
+		try {
+			expect(__testing.wordDiffAnalysis("hello world", "hello there")).toEqual({
+				similarity: 0,
+				oldRanges: [],
+				newRanges: [],
+			});
+		} finally {
+			clock.mockRestore();
+		}
+	});
+
+	it.each(["unified", "split"] as const)(
+		"renders huge changed lines in %s layout",
+		async (layout) => {
+			const diff = parseDiff("old source; ".repeat(16000), "new source; ".repeat(16000));
+			const rows = (
+				await renderSplit(diff, undefined, 50, undefined, 200, {
+					frameless: true,
+					layout,
+				})
+			).split("\n");
+			expect(rows).toHaveLength(layout === "split" ? 1 : 2);
+			expect(rows.every((row) => visibleWidth(row) <= 200)).toBe(true);
+			expect(stripAnsi(rows.join("\n"))).toContain("old source;");
+			expect(stripAnsi(rows.join("\n"))).toContain("new source;");
+		},
+	);
 });
 
 describe("__testing helpers", () => {

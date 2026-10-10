@@ -816,9 +816,24 @@ interface WordDiffAnalysis {
 	newRanges: Array<[number, number]>;
 }
 
+// Word emphasis is optional: never let minified JSON or unrelated lines
+// monopolize the TUI thread. The size cap also bounds work before timeout checks.
+const WORD_DIFF_MAX_CHARS = 8192;
+const WORD_DIFF_MAX_EDITS = 128;
+const WORD_DIFF_TIMEOUT_MS = 5;
+
+function boundedWordDiff(a: string, b: string) {
+	if (a.length + b.length > WORD_DIFF_MAX_CHARS) return undefined;
+	return Diff.diffWords(a, b, {
+		maxEditLength: WORD_DIFF_MAX_EDITS,
+		timeout: WORD_DIFF_TIMEOUT_MS,
+	});
+}
+
 function wordDiffAnalysis(a: string, b: string): WordDiffAnalysis {
 	if (!a && !b) return { similarity: 1, oldRanges: [], newRanges: [] };
-	const parts = Diff.diffWords(a, b);
+	const parts = boundedWordDiff(a, b);
+	if (!parts) return { similarity: 0, oldRanges: [], newRanges: [] };
 	const oldRanges: Array<[number, number]> = [];
 	const newRanges: Array<[number, number]> = [];
 	let oPos = 0;
@@ -879,7 +894,8 @@ function injectBg(
 }
 
 function plainWordDiff(oldText: string, newText: string): { old: string; new: string } {
-	const parts = Diff.diffWords(oldText, newText);
+	const parts = boundedWordDiff(oldText, newText);
+	if (!parts) return { old: oldText, new: newText };
 	let o = "";
 	let n = "";
 	for (const p of parts) {
