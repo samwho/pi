@@ -1,5 +1,23 @@
 {
   "mcpServers": {
+    "firefox-devtools": {
+      "command": "mise",
+      "args": [
+        "exec",
+        "-q",
+        "node@latest",
+        "npm:@mozilla/firefox-devtools-mcp@latest",
+        "--",
+        "firefox-devtools-mcp",
+        "--headless",
+        "--firefox-path=/Applications/Firefox.app/Contents/MacOS/firefox",
+        "--tool-preset=developer"
+      ]
+    },
+    "safari-devtools": {
+      "command": "/usr/bin/safaridriver",
+      "args": ["--mcp"]
+    },
     "chrome-devtools": {
       "command": "mise",
       "args": [
