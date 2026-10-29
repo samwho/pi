@@ -2,7 +2,7 @@
   "lastChangelogVersion": "0.99.1",
   "theme": "dark",
   "quietStartup": true,
-  "defaultProvider": "openai-codex",
+  "defaultProvider": "openai",
   "defaultModel": "gpt-6.1-sol",
   "defaultThinkingLevel": "medium",
   "tuiMode": "fullscreen",
