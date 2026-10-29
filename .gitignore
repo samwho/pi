@@ -25,6 +25,7 @@ secrets*.json
 agent/sessions/
 
 # Generated state and dependencies
+agent/bin/
 .venv/
 agent/models-store.json
 agent/npm/node_modules/
