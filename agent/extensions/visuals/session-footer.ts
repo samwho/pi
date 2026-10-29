@@ -3,7 +3,7 @@ import { lstat, open } from "node:fs/promises";
 import { join } from "node:path";
 import { FAST_COST_MULTIPLIER } from "../fast-mode.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { parseColor, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 type StatusColor = "success" | "warning" | "error";
 type GitDelta = { additions: number; deletions: number };
@@ -12,6 +12,7 @@ type GitDelta = { additions: number; deletions: number };
 // input/output is used so an expensive output price is not hidden by cheap input.
 const CHEAP_PRICE = 5;
 const EXPENSIVE_PRICE = 20;
+const WEEKLY_USAGE_COLOR = parseColor("#60a5fa");
 
 function sessionCost(ctx: ExtensionContext): number {
 	let cost = 0;
@@ -172,11 +173,46 @@ function modelLabel(provider: string | undefined, id: string | undefined): strin
 	return provider?.startsWith("openai") ? id.replace(/^gpt-\d+(?:\.\d+)*-/, "") : id;
 }
 
+type UsageWindow = { kind: string; usedPercent: number; resetsAt?: number };
+type UsageStatus = { status: string; windows?: UsageWindow[] };
+
+export function formatWeeklyUsage(
+	window: UsageWindow | undefined,
+	now = Date.now(),
+): string | undefined {
+	if (!window || !Number.isFinite(window.usedPercent)) return undefined;
+	const percent = `${Math.round(window.usedPercent)}%`;
+	const remaining = (window.resetsAt ?? 0) * 1000 - now;
+	if (!Number.isFinite(remaining) || remaining <= 0) return percent;
+	const hour = 60 * 60 * 1000;
+	const day = 24 * hour;
+	const countdown =
+		remaining > day
+			? `${Math.ceil(remaining / day)}d`
+			: remaining >= hour
+				? `${Math.ceil(remaining / hour)}h`
+				: `${Math.ceil(remaining / (60 * 1000))}m`;
+	return `${percent} ↻${countdown}`;
+}
+
 export default function (pi: ExtensionAPI) {
+	let weeklyUsage: UsageWindow | undefined;
 	let requestFooterRender: (() => void) | undefined;
 	let invalidateStats: (() => void) | undefined;
 	let gitDelta: GitDelta | null = null;
 	let gitRefreshVersion = 0;
+
+	pi.events.on("subscription-usage/status/v1", (data) => {
+		const event = data as UsageStatus;
+		weeklyUsage =
+			event.status === "ready"
+				? event.windows?.find((window) => window.kind === "weekly")
+				: undefined;
+		requestFooterRender?.();
+	});
+	pi.on("session_shutdown", () => {
+		weeklyUsage = undefined;
+	});
 
 	async function refreshGitDelta(ctx: ExtensionContext): Promise<void> {
 		const version = ++gitRefreshVersion;
@@ -264,7 +300,12 @@ export default function (pi: ExtensionAPI) {
 						? theme.fg("dim", `$${formatRate(inputRate)}/$${formatRate(outputRate)}`)
 						: "";
 					const fastText = fastEnabled ? theme.fg("warning", "fast") : "";
-					const right = [modelText, thinkingText, fastText, ratesText].filter(Boolean).join(" ");
+					const usage = formatWeeklyUsage(weeklyUsage);
+					const usageText = usage ? theme.style(usage, { fg: WEEKLY_USAGE_COLOR }) : "";
+					const modelDetails = [modelText, thinkingText, fastText, ratesText]
+						.filter(Boolean)
+						.join(" ");
+					const right = [modelDetails, usageText].filter(Boolean).join(" ");
 					const padding = " ".repeat(Math.max(2, width - visibleWidth(left) - visibleWidth(right)));
 
 					return [truncateToWidth(left + padding + right, width)];
