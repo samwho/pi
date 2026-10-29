@@ -1,5 +1,9 @@
 {
   "mcpServers": {
+    "rex-community": {
+      "url": "https://www.superlogical.com/rex/community-mcp",
+      "description": "Read-only Rex documentation, changelog, and Rex Beta Discord discussions and feedback"
+    },
     "firefox-devtools": {
       "command": "mise",
       "args": [
@@ -16,7 +20,9 @@
     },
     "safari-devtools": {
       "command": "/usr/bin/safaridriver",
-      "args": ["--mcp"]
+      "args": [
+        "--mcp"
+      ]
     },
     "chrome-devtools": {
       "command": "mise",
@@ -29,7 +35,7 @@
         "chrome-devtools-mcp",
         "--headless",
         "--isolated",
-        "--executablePath=/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "--channel=beta",
         "--allowUnrestrictedPaths"
       ]
     },
