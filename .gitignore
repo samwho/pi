@@ -4,6 +4,8 @@ agent/pi-pretty
 # Credentials and private configuration
 agent/auth.json
 agent/trust.json
+agent/mcp-credentials/
+agent/mcp-auth.json
 
 agent/mcp-cache.json
 agent/mcp-onboarding.json

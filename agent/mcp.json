@@ -14,6 +14,38 @@
         "--executablePath=/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
         "--allowUnrestrictedPaths"
       ]
+    },
+    "fastmail-read": {
+      "url": "https://mcp-https.tailnet-019c.ts.net/fastmail-read/",
+      "headers": {
+        "Authorization": "!python3 -c 'from pathlib import Path; print(\"Bearer \" + (Path.home() / \".pi/agent/mcp-credentials/fastmail-read\").read_text().strip())'"
+      },
+      "exposure": "codemode",
+      "description": "Read-only Fastmail email, contacts, calendars and notes; no compose, send or mutation tools."
+    },
+    "paperless-read": {
+      "url": "https://mcp-https.tailnet-019c.ts.net/paperless-read/",
+      "headers": {
+        "Authorization": "!python3 -c 'from pathlib import Path; print(\"Bearer \" + (Path.home() / \".pi/agent/mcp-credentials/paperless-read\").read_text().strip())'"
+      },
+      "exposure": "codemode",
+      "description": "Read-only Paperless document search, document content and metadata, tags, correspondents and document types."
+    },
+    "kubernetes-read": {
+      "url": "https://mcp-https.tailnet-019c.ts.net/kubernetes-read/",
+      "headers": {
+        "Authorization": "!python3 -c 'from pathlib import Path; print(\"Bearer \" + (Path.home() / \".pi/agent/mcp-credentials/kubernetes-read\").read_text().strip())'"
+      },
+      "exposure": "codemode",
+      "description": "Read-only homelab Kubernetes workloads, events, node and Pod metrics, and Pod logs; no Secret or ConfigMap reads, writes, exec or port-forward."
+    },
+    "voicenotes-read": {
+      "url": "https://mcp-https.tailnet-019c.ts.net/voicenotes-read/",
+      "headers": {
+        "Authorization": "!python3 -c 'from pathlib import Path; print(\"Bearer \" + (Path.home() / \".pi/agent/mcp-credentials/voicenotes-read\").read_text().strip())'"
+      },
+      "exposure": "codemode",
+      "description": "Read-only Voicenotes semantic note search, note listing, and transcript retrieval; no note creation or mutation tools."
     }
   }
 }
