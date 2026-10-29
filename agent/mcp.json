@@ -1,20 +1,5 @@
 {
   "mcpServers": {
-    "chrome-devtools": {
-      "command": "mise",
-      "args": [
-        "exec",
-        "-q",
-        "node@latest",
-        "npm:chrome-devtools-mcp@latest",
-        "--",
-        "chrome-devtools-mcp",
-        "--headless",
-        "--isolated",
-        "--executablePath=/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-        "--allowUnrestrictedPaths"
-      ]
-    },
     "fastmail-read": {
       "url": "https://mcp-https.tailnet-019c.ts.net/fastmail-read/",
       "headers": {
@@ -46,6 +31,10 @@
       },
       "exposure": "codemode",
       "description": "Read-only Voicenotes semantic note search, note listing, and transcript retrieval; no note creation or mutation tools."
+    },
+    "rex-community": {
+      "url": "https://www.superlogical.com/rex/community-mcp",
+      "description": "Read-only Rex documentation, changelog, and Rex Beta Discord discussions and feedback"
     }
   }
 }
