@@ -18,7 +18,6 @@
   "steeringMode": "one-at-a-time",
   "packages": [
     "git:github.com/badlogic/pi-skills",
-    "npm:pi-context-view",
     "npm:pi-web-search",
     "git:github.com/specode/pi-subscription-usage@1015f9f419dfef9ac27c9845ec2318394928fa38"
   ],
