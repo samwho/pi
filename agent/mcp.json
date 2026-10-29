@@ -1,5 +1,9 @@
 {
   "mcpServers": {
+    "rex-community": {
+      "url": "https://www.superlogical.com/rex/community-mcp",
+      "description": "Read-only Rex documentation, changelog, and Rex Beta Discord discussions and feedback"
+    },
     "fastmail-read": {
       "url": "https://mcp-https.tailnet-019c.ts.net/fastmail-read/",
       "headers": {
@@ -39,10 +43,6 @@
       },
       "exposure": "codemode",
       "description": "Read-only homelab Prometheus metrics, PromQL, alerts, rules, targets, status and documentation; no lifecycle, TSDB administration or raw configuration tools."
-    },
-    "rex-community": {
-      "url": "https://www.superlogical.com/rex/community-mcp",
-      "description": "Read-only Rex documentation, changelog, and Rex Beta Discord discussions and feedback"
     }
   }
 }

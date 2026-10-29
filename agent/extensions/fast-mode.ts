@@ -5,9 +5,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 
 export const FAST_COST_MULTIPLIER = 2.5;
 const CONFIG_FIELD = "pi-gpt-fast-mode";
-const DEFAULT_SHORTCUT = "ctrl+alt+m";
 const FAST_SERVICE_TIER = "priority";
-const RESERVED_SHORTCUTS = new Set(["ctrl+m", "enter", "return"]);
 
 const SUPPORTED_MODELS = new Set([
 	"openai/gpt-5.4",
@@ -33,17 +31,6 @@ const SUPPORTED_MODELS = new Set([
 ]);
 
 type JsonObject = Record<string, unknown>;
-
-type ModelPreset = {
-	modelId: string;
-	thinking: "xhigh" | "medium";
-	fast: boolean;
-};
-
-const MODEL_PRESETS = {
-	luna: { modelId: "gpt-6-luna", thinking: "xhigh", fast: true },
-	sol: { modelId: "gpt-6-sol", thinking: "medium", fast: false },
-} satisfies Record<string, ModelPreset>;
 
 type PiFileOptions = {
 	env?: Record<string, string | undefined>;
@@ -119,23 +106,6 @@ function saveEnabled(enabled: boolean): void {
 	}
 }
 
-function normalizeShortcuts(value: unknown): string[] {
-	const values = Array.isArray(value) ? value : [value];
-	return values
-		.filter((item): item is string => typeof item === "string")
-		.map((item) => item.trim())
-		.filter(Boolean)
-		.filter((shortcut) => !RESERVED_SHORTCUTS.has(shortcut.toLowerCase()));
-}
-
-function loadShortcuts(): string[] {
-	const config = readJson(resolvePiFilePath("keybindings.json"))?.[CONFIG_FIELD];
-	if (config === false || config === null) return [];
-	if (Array.isArray(config)) return normalizeShortcuts(config);
-	const shortcuts = normalizeShortcuts(config);
-	return shortcuts.length > 0 ? shortcuts : [DEFAULT_SHORTCUT];
-}
-
 function modelKey(model: { provider?: string; id?: string } | undefined): string {
 	return `${model?.provider}/${model?.id}`;
 }
@@ -176,53 +146,15 @@ export default function (pi: ExtensionAPI): void {
 		announceState(ctx, enabled);
 	};
 
-	const applyPreset = async (
-		name: string,
-		preset: ModelPreset,
-		ctx: ExtensionContext,
-	): Promise<void> => {
-		const model = ctx.modelRegistry.find("openai", preset.modelId);
-		if (!model) {
-			ctx.ui.notify(`Model not found: openai/${preset.modelId}`, "error");
-			return;
-		}
-
-		try {
-			const selected = await pi.setModel(model);
-			if (!selected) {
-				ctx.ui.notify(`No API key configured for openai/${preset.modelId}.`, "error");
-				return;
-			}
-
-			pi.setThinkingLevel(preset.thinking);
-			setEnabled(preset.fast, ctx);
-			ctx.ui.notify(
-				`${name}: ${model.provider}/${model.id}, ${preset.thinking} thinking, fast ${preset.fast ? "on" : "off"}.`,
-				"info",
-			);
-		} catch (error) {
-			ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
-		}
-	};
-
 	pi.registerCommand("fast", {
 		description: "Toggle GPT Fast mode (service_tier: priority)",
 		handler: async (_args, ctx) => toggle(ctx),
 	});
 
-	for (const [name, preset] of Object.entries(MODEL_PRESETS)) {
-		pi.registerCommand(name, {
-			description: `Switch to ${preset.modelId} (${preset.thinking} thinking, fast ${preset.fast ? "on" : "off"})`,
-			handler: async (_args, ctx) => applyPreset(name, preset, ctx),
-		});
-	}
-
-	for (const shortcut of loadShortcuts()) {
-		pi.registerShortcut(shortcut as Parameters<ExtensionAPI["registerShortcut"]>[0], {
-			description: "Toggle GPT Fast mode",
-			handler: async (ctx) => toggle(ctx),
-		});
-	}
+	pi.events.on("fast-mode/set-enabled", (data) => {
+		const { enabled: next, ctx } = data as { enabled: boolean; ctx: ExtensionContext };
+		setEnabled(next, ctx);
+	});
 
 	pi.on("session_start", (_event, ctx) => {
 		enabled = loadDefaultEnabled();

@@ -1,5 +1,5 @@
 {
-  "lastChangelogVersion": "0.99.1",
+  "lastChangelogVersion": "1.4.0",
   "theme": "dark",
   "quietStartup": true,
   "defaultProvider": "openai",
@@ -10,7 +10,7 @@
   "defaultProjectTrust": "ask",
   "showCacheMissNotices": true,
   "pi-gpt-fast-mode": {
-    "enabled": true
+    "enabled": false
   },
   "terminal": {
     "showTerminalProgress": true
@@ -18,8 +18,8 @@
   "steeringMode": "one-at-a-time",
   "packages": [
     "git:github.com/badlogic/pi-skills",
-    "npm:@pi-plugins/usage",
-    "npm:pi-context-view",
-    "npm:pi-web-search"
-  ]
+    "npm:pi-web-search",
+    "git:github.com/specode/pi-subscription-usage@1015f9f419dfef9ac27c9845ec2318394928fa38"
+  ],
+  "deviceId": "c2ef2c5d-bae8-487c-9f8a-58cd6f5f4b83"
 }

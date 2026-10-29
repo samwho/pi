@@ -3,10 +3,13 @@ minimum_release_age = "0h"
 
 [tools]
 "aqua:tmux/tmux-builds" = "3.7c"
-"aqua:betterleaks/betterleaks" = "latest"
-"aqua:rtk-ai/rtk" = "latest"
-"npm:chrome-devtools-mcp" = "latest"
-"npm:@earendil-works/pi-coding-agent" = "latest"
-uv = "latest"
-oxlint = "1.84.0"
-oxfmt = "0.71.0"
+"aqua:betterleaks/betterleaks" = { version = "latest", auto_update = true }
+"aqua:rtk-ai/rtk" = { version = "latest", auto_update = true }
+"npm:chrome-devtools-mcp" = { version = "latest", auto_update = true }
+"npm:@earendil-works/pi-coding-agent" = { version = "latest", auto_update = true }
+uv = { version = "latest", auto_update = true }
+node = { version = "latest", auto_update = true }
+pnpm = { version = "latest", auto_update = true }
+biome = { version = "latest", auto_update = true }
+oxlint = "1.89.0"
+oxfmt = "0.74.0"
