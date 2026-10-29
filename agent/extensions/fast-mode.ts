@@ -181,16 +181,16 @@ export default function (pi: ExtensionAPI): void {
 		preset: ModelPreset,
 		ctx: ExtensionContext,
 	): Promise<void> => {
-		const model = ctx.modelRegistry.find("openai-codex", preset.modelId);
+		const model = ctx.modelRegistry.find("openai", preset.modelId);
 		if (!model) {
-			ctx.ui.notify(`Model not found: openai-codex/${preset.modelId}`, "error");
+			ctx.ui.notify(`Model not found: openai/${preset.modelId}`, "error");
 			return;
 		}
 
 		try {
 			const selected = await pi.setModel(model);
 			if (!selected) {
-				ctx.ui.notify(`No API key configured for openai-codex/${preset.modelId}.`, "error");
+				ctx.ui.notify(`No API key configured for openai/${preset.modelId}.`, "error");
 				return;
 			}
 
