@@ -95,8 +95,14 @@ it("shows live subscription usage to the right of model pricing", () => {
 		],
 	});
 	expect(footer.render(100)).toHaveLength(1);
-	expect(footer.render(100)[0]).toMatch(/sol off \$5\/\$20 15% ↻3d$/);
-	expect(style).toHaveBeenCalledWith("15% ↻3d", { fg: parseColor("#60a5fa") });
+	expect(footer.render(100)[0]).toMatch(/sol off \$5\/\$20 15% 3d$/);
+	expect(style).toHaveBeenCalledWith("15% 3d", { fg: parseColor("#60a5fa") });
+	usageChanged({
+		status: "ready",
+		availableResets: 2,
+		windows: [{ kind: "weekly", usedPercent: 15, resetsAt: Date.now() / 1000 + 3 * 86400 }],
+	});
+	expect(footer.render(100)[0]).toMatch(/15% 3d \[2\]$/);
 	usageChanged({ status: "ready", windows: [{ kind: "weekly", usedPercent: 20 }] });
 	expect(footer.render(100)[0]).toMatch(/\$5\/\$20 20%$/);
 	for (const line of footer.render(8)) expect(visibleWidth(line)).toBeLessThanOrEqual(8);
@@ -116,17 +122,27 @@ it("formats used percentage and a single rounded-up reset unit", () => {
 			},
 			now,
 		);
-	expect(format(3 * 86400 + 1)).toBe("23% ↻4d");
-	expect(format(86401)).toBe("23% ↻2d");
-	expect(format(86400)).toBe("23% ↻24h");
-	expect(format(3601)).toBe("23% ↻2h");
-	expect(format(3600)).toBe("23% ↻1h");
-	expect(format(3599)).toBe("23% ↻60m");
-	expect(format(61)).toBe("23% ↻2m");
-	expect(format(1)).toBe("23% ↻1m");
+	expect(format(3 * 86400 + 1)).toBe("23% 4d");
+	expect(format(86401)).toBe("23% 2d");
+	expect(format(86400)).toBe("23% 24h");
+	expect(format(3601)).toBe("23% 2h");
+	expect(format(3600)).toBe("23% 1h");
+	expect(format(3599)).toBe("23% 60m");
+	expect(format(61)).toBe("23% 2m");
+	expect(format(1)).toBe("23% 1m");
 	expect(format(0)).toBe("23%");
 	expect(format(-1)).toBe("23%");
 	expect(formatWeeklyUsage(undefined, now)).toBeUndefined();
+});
+
+it("only shows positive, verified reset counts", () => {
+	const now = 1_900_000_000_000;
+	const window = { kind: "weekly", usedPercent: 23, resetsAt: now / 1000 + 2 * 86400 };
+	expect(formatWeeklyUsage(window, now, 2)).toBe("23% 2d [2]");
+	for (const count of [undefined, 0, -1, 1.5, NaN, Infinity]) {
+		expect(formatWeeklyUsage(window, now, count)).toBe("23% 2d");
+	}
+	expect(formatWeeklyUsage({ ...window, resetsAt: undefined }, now, 1)).toBe("23% [1]");
 });
 
 it("ignores files removed after Git lists them", async () => {

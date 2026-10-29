@@ -18,8 +18,7 @@
   "steeringMode": "one-at-a-time",
   "packages": [
     "git:github.com/badlogic/pi-skills",
-    "npm:pi-web-search",
-    "git:github.com/specode/pi-subscription-usage@1015f9f419dfef9ac27c9845ec2318394928fa38"
+    "npm:pi-web-search"
   ],
   "deviceId": "c2ef2c5d-bae8-487c-9f8a-58cd6f5f4b83"
 }

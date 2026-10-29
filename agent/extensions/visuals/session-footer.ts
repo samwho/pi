@@ -174,16 +174,23 @@ function modelLabel(provider: string | undefined, id: string | undefined): strin
 }
 
 type UsageWindow = { kind: string; usedPercent: number; resetsAt?: number };
-type UsageStatus = { status: string; windows?: UsageWindow[] };
+type UsageStatus = { status: string; windows?: UsageWindow[]; availableResets?: number };
 
 export function formatWeeklyUsage(
 	window: UsageWindow | undefined,
 	now = Date.now(),
+	availableResets?: number,
 ): string | undefined {
 	if (!window || !Number.isFinite(window.usedPercent)) return undefined;
 	const percent = `${Math.round(window.usedPercent)}%`;
+	const resets =
+		typeof availableResets === "number" &&
+		Number.isSafeInteger(availableResets) &&
+		availableResets > 0
+			? ` [${availableResets}]`
+			: "";
 	const remaining = (window.resetsAt ?? 0) * 1000 - now;
-	if (!Number.isFinite(remaining) || remaining <= 0) return percent;
+	if (!Number.isFinite(remaining) || remaining <= 0) return percent + resets;
 	const hour = 60 * 60 * 1000;
 	const day = 24 * hour;
 	const countdown =
@@ -192,11 +199,12 @@ export function formatWeeklyUsage(
 			: remaining >= hour
 				? `${Math.ceil(remaining / hour)}h`
 				: `${Math.ceil(remaining / (60 * 1000))}m`;
-	return `${percent} ↻${countdown}`;
+	return `${percent} ${countdown}${resets}`;
 }
 
 export default function (pi: ExtensionAPI) {
 	let weeklyUsage: UsageWindow | undefined;
+	let availableResets: number | undefined;
 	let requestFooterRender: (() => void) | undefined;
 	let invalidateStats: (() => void) | undefined;
 	let gitDelta: GitDelta | null = null;
@@ -204,6 +212,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.events.on("subscription-usage/status/v1", (data) => {
 		const event = data as UsageStatus;
+		availableResets = event.status === "ready" ? event.availableResets : undefined;
 		weeklyUsage =
 			event.status === "ready"
 				? event.windows?.find((window) => window.kind === "weekly")
@@ -212,6 +221,7 @@ export default function (pi: ExtensionAPI) {
 	});
 	pi.on("session_shutdown", () => {
 		weeklyUsage = undefined;
+		availableResets = undefined;
 	});
 
 	async function refreshGitDelta(ctx: ExtensionContext): Promise<void> {
@@ -300,7 +310,7 @@ export default function (pi: ExtensionAPI) {
 						? theme.fg("dim", `$${formatRate(inputRate)}/$${formatRate(outputRate)}`)
 						: "";
 					const fastText = fastEnabled ? theme.fg("warning", "fast") : "";
-					const usage = formatWeeklyUsage(weeklyUsage);
+					const usage = formatWeeklyUsage(weeklyUsage, Date.now(), availableResets);
 					const usageText = usage ? theme.style(usage, { fg: WEEKLY_USAGE_COLOR }) : "";
 					const modelDetails = [modelText, thinkingText, fastText, ratesText]
 						.filter(Boolean)
