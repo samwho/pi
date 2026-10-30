@@ -36,6 +36,14 @@
       "exposure": "codemode",
       "description": "Read-only Voicenotes semantic note search, note listing, and transcript retrieval; no note creation or mutation tools."
     },
+    "porkbun-read": {
+      "url": "https://mcp-https.tailnet-019c.ts.net/porkbun-read/",
+      "headers": {
+        "Authorization": "!python3 -c 'from pathlib import Path; print(\"Bearer \" + (Path.home() / \".pi/agent/mcp-credentials/porkbun-read\").read_text().strip())'"
+      },
+      "exposure": "codemode",
+      "description": "Read-only Porkbun domain, DNS, nameserver, forwarding, account, hosting metadata and documentation queries; no mutations, purchases, payments or credential retrieval."
+    },
     "prometheus-read": {
       "url": "https://mcp-https.tailnet-019c.ts.net/prometheus-read/",
       "headers": {
