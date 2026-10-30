@@ -1,7 +1,8 @@
 // Adapted from specode/pi-subscription-usage and @narumitw/pi-usage (MIT).
 export type UsageWindow = { kind: "hourly" | "weekly"; usedPercent: number; resetsAt?: number };
+export type ResetCredits = { availableResets: number; nextResetExpiresAt?: number };
 export type UsageStatus =
-	| { v: 1; status: "ready"; windows: UsageWindow[]; availableResets?: number }
+	| ({ v: 1; status: "ready"; windows: UsageWindow[] } & Partial<ResetCredits>)
 	| { v: 1; status: "unavailable" };
 
 export function object(value: unknown): Record<string, unknown> | undefined {
@@ -72,8 +73,11 @@ export function planWindows(payload: Record<string, unknown>): UsageWindow[] {
 	return windows;
 }
 
-/** Count only explicit, available, supported, unexpired reset tickets. */
-export function resetCount(payload: Record<string, unknown>, now = Date.now()): number | undefined {
+/** Count verified reset tickets and retain the soonest expiry (Unix seconds). */
+export function resetCredits(
+	payload: Record<string, unknown>,
+	now = Date.now(),
+): ResetCredits | undefined {
 	const count = Number(payload.available_count);
 	if (
 		payload.available_count == null ||
@@ -83,6 +87,7 @@ export function resetCount(payload: Record<string, unknown>, now = Date.now()): 
 	)
 		return undefined;
 	let available = 0;
+	let nextExpiry = Infinity;
 	for (const raw of payload.credits) {
 		const credit = object(raw);
 		if (
@@ -97,8 +102,15 @@ export function resetCount(payload: Record<string, unknown>, now = Date.now()): 
 			const expires = Date.parse(credit.expires_at);
 			if (!Number.isFinite(expires)) return undefined;
 			if (expires <= now) continue;
+			nextExpiry = Math.min(nextExpiry, expires);
 		}
 		available++;
 	}
-	return Math.min(count, available);
+	const availableResets = Math.min(count, available);
+	return {
+		availableResets,
+		...(availableResets > 0 && Number.isFinite(nextExpiry)
+			? { nextResetExpiresAt: nextExpiry / 1000 }
+			: {}),
+	};
 }

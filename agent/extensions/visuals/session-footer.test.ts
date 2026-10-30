@@ -103,6 +103,13 @@ it("shows live subscription usage to the right of model pricing", () => {
 		windows: [{ kind: "weekly", usedPercent: 15, resetsAt: Date.now() / 1000 + 3 * 86400 }],
 	});
 	expect(footer.render(100)[0]).toMatch(/15% 3d \[2\]$/);
+	usageChanged({
+		status: "ready",
+		availableResets: 2,
+		nextResetExpiresAt: Date.now() / 1000 + 5 * 86400,
+		windows: [{ kind: "weekly", usedPercent: 15 }],
+	});
+	expect(footer.render(100)[0]).toMatch(/15% \[2 5d\]$/);
 	usageChanged({ status: "ready", windows: [{ kind: "weekly", usedPercent: 20 }] });
 	expect(footer.render(100)[0]).toMatch(/\$5\/\$20 20%$/);
 	for (const line of footer.render(8)) expect(visibleWidth(line)).toBeLessThanOrEqual(8);
@@ -143,6 +150,22 @@ it("only shows positive, verified reset counts", () => {
 		expect(formatWeeklyUsage(window, now, count)).toBe("23% 2d");
 	}
 	expect(formatWeeklyUsage({ ...window, resetsAt: undefined }, now, 1)).toBe("23% [1]");
+});
+
+it("shows the soonest ticket expiry inside the reset-count brackets", () => {
+	const now = 1_900_000_000_000;
+	const window = { kind: "weekly", usedPercent: 23, resetsAt: now / 1000 + 2 * 86400 };
+	for (const [seconds, label] of [
+		[5 * 86400, "5d"],
+		[3601, "2h"],
+		[61, "2m"],
+	] as const) {
+		expect(formatWeeklyUsage(window, now, 2, now / 1000 + seconds)).toBe(`23% 2d [2 ${label}]`);
+	}
+	for (const expiry of [undefined, NaN, Infinity, now / 1000, now / 1000 - 1]) {
+		expect(formatWeeklyUsage(window, now, 2, expiry)).toBe("23% 2d [2]");
+	}
+	expect(formatWeeklyUsage(window, now, 0, now / 1000 + 60)).toBe("23% 2d");
 });
 
 it("ignores files removed after Git lists them", async () => {

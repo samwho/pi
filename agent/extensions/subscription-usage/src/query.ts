@@ -6,7 +6,8 @@ import {
 	object,
 	openaiClientId,
 	planWindows,
-	resetCount,
+	resetCredits,
+	type ResetCredits,
 	type UsageStatus,
 } from "./data.ts";
 
@@ -126,9 +127,9 @@ export async function queryUsage(auth: UsageAuth, signal: AbortSignal): Promise<
 		}
 	}
 	const windows = planWindows(await fetchJson(USAGE_URL, auth, signal));
-	let availableResets: number | undefined;
+	let resets: ResetCredits | undefined;
 	try {
-		availableResets = resetCount(await fetchJson(RESET_URL, auth, signal));
+		resets = resetCredits(await fetchJson(RESET_URL, auth, signal));
 	} catch {
 		// A failed reset lookup must not hide valid quota data.
 	}
@@ -136,6 +137,6 @@ export async function queryUsage(auth: UsageAuth, signal: AbortSignal): Promise<
 		v: 1,
 		status: "ready",
 		windows,
-		...(availableResets === undefined ? {} : { availableResets }),
+		...resets,
 	};
 }
