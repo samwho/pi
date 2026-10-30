@@ -4,41 +4,6 @@
       "url": "https://www.superlogical.com/rex/community-mcp",
       "description": "Read-only Rex documentation, changelog, and Rex Beta Discord discussions and feedback"
     },
-    "firefox-devtools": {
-      "command": "mise",
-      "args": [
-        "exec",
-        "-q",
-        "node@latest",
-        "npm:@mozilla/firefox-devtools-mcp@latest",
-        "--",
-        "firefox-devtools-mcp",
-        "--headless",
-        "--firefox-path=/Applications/Firefox.app/Contents/MacOS/firefox",
-        "--tool-preset=developer"
-      ]
-    },
-    "safari-devtools": {
-      "command": "/usr/bin/safaridriver",
-      "args": [
-        "--mcp"
-      ]
-    },
-    "chrome-devtools": {
-      "command": "mise",
-      "args": [
-        "exec",
-        "-q",
-        "node@latest",
-        "npm:chrome-devtools-mcp@latest",
-        "--",
-        "chrome-devtools-mcp",
-        "--headless",
-        "--isolated",
-        "--channel=beta",
-        "--allowUnrestrictedPaths"
-      ]
-    },
     "fastmail-read": {
       "url": "https://mcp-https.tailnet-019c.ts.net/fastmail-read/",
       "headers": {
@@ -70,6 +35,14 @@
       },
       "exposure": "codemode",
       "description": "Read-only Voicenotes semantic note search, note listing, and transcript retrieval; no note creation or mutation tools."
+    },
+    "prometheus-read": {
+      "url": "https://mcp-https.tailnet-019c.ts.net/prometheus-read/",
+      "headers": {
+        "Authorization": "!python3 -c 'from pathlib import Path; print(\"Bearer \" + (Path.home() / \".pi/agent/mcp-credentials/prometheus-read\").read_text().strip())'"
+      },
+      "exposure": "codemode",
+      "description": "Read-only homelab Prometheus metrics, PromQL, alerts, rules, targets, status and documentation; no lifecycle, TSDB administration or raw configuration tools."
     }
   }
 }

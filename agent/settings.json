@@ -7,6 +7,7 @@
   "defaultThinkingLevel": "medium",
   "tuiMode": "fullscreen",
   "fullscreenScrollbar": "hidden",
+  "fullscreenWheelScrollLines": 1,
   "defaultProjectTrust": "ask",
   "showCacheMissNotices": true,
   "pi-gpt-fast-mode": {
@@ -20,5 +21,5 @@
     "git:github.com/badlogic/pi-skills",
     "npm:pi-web-search"
   ],
-  "deviceId": "c2ef2c5d-bae8-487c-9f8a-58cd6f5f4b83"
+  "deviceId": "f6891bdc-bdb9-4f12-867d-c06d8b680e00"
 }
