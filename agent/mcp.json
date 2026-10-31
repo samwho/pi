@@ -1,5 +1,14 @@
 {
   "mcpServers": {
+    "atuin": {
+      "command": "sh",
+      "args": [
+        "-c",
+        "export PATH=\"$HOME/.local/share/mise/shims:/opt/homebrew/bin:/usr/local/bin:$PATH\"; if [ -z \"${ATUIN_CONFIG_DIR:-}\" ] && [ -f \"$HOME/.atuin/config.toml\" ]; then export ATUIN_CONFIG_DIR=\"$HOME/.atuin\"; fi; exec atuin mcp"
+      ],
+      "exposure": "codemode",
+      "description": "Search synced shell command history and coding-agent threads with Atuin."
+    },
     "rex-community": {
       "url": "https://www.superlogical.com/rex/community-mcp",
       "description": "Read-only Rex documentation, changelog, and Rex Beta Discord discussions and feedback"
