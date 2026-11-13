@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
+import { watch, type FSWatcher } from "node:fs";
 import { lstat, open } from "node:fs/promises";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { FAST_COST_MULTIPLIER } from "../fast-mode.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { parseColor, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
@@ -212,6 +213,69 @@ export function formatWeeklyUsage(
 	return `${percent}${countdown ? ` ${countdown}` : ""}${resets}`;
 }
 
+/** Positive means quota consumption is ahead of the elapsed weekly allowance. */
+export function weeklyPaceDelta(window: UsageWindow | undefined, now = Date.now()): number | undefined {
+	if (
+		!window ||
+		!Number.isFinite(window.usedPercent) ||
+		typeof window.resetsAt !== "number" ||
+		!Number.isFinite(window.resetsAt)
+	)
+		return undefined;
+	const week = 7 * 24 * 60 * 60 * 1000;
+	const remaining = window.resetsAt * 1000 - now;
+	// Do not infer a pace from a stale reset or an invalid weekly window.
+	if (remaining <= 0 || remaining > week) return undefined;
+	const elapsedPercent = (1 - remaining / week) * 100;
+	return Math.round(window.usedPercent - elapsedPercent) || 0;
+}
+
+/** Native filesystem notifications, coalesced across editor saves and Git operations. */
+export function watchGitRepository(root: string, gitDirs: string[], onChange: () => void): () => void {
+	const watchers: FSWatcher[] = [];
+	let debounce: ReturnType<typeof setTimeout> | undefined;
+	const changed = () => {
+		clearTimeout(debounce);
+		debounce = setTimeout(onChange, 150);
+		debounce.unref();
+	};
+	const addWatcher = (path: string, metadata: boolean) => {
+		try {
+			const watcher = watch(path, { recursive: true }, (_event, filename) => {
+				const name = filename?.toString();
+				const parts = name?.split(/[\\/]/);
+				if (parts) {
+					if (metadata) {
+						if (!["HEAD", "index", "packed-refs", "refs"].includes(parts[0])) return;
+						if (parts.at(-1)?.endsWith(".lock")) return;
+					} else {
+						if (parts.some((part) => [".git", "node_modules"].includes(part))) return;
+						// Linked worktrees can store Git metadata outside .git.
+						if (
+							gitDirs.some((dir) => {
+								const rel = relative(dir, join(root, name ?? ""));
+								return rel === "" || (!rel.startsWith("..") && !rel.startsWith("/"));
+							})
+						) return;
+					}
+				}
+				changed();
+			});
+			watcher.on("error", () => watcher.close());
+			watcher.unref();
+			watchers.push(watcher);
+		} catch {
+			// Unsupported/missing watch paths still get tool-triggered refreshes.
+		}
+	};
+	addWatcher(root, false);
+	for (const dir of new Set(gitDirs)) addWatcher(dir, true);
+	return () => {
+		clearTimeout(debounce);
+		for (const watcher of watchers) watcher.close();
+	};
+}
+
 export default function (pi: ExtensionAPI) {
 	let weeklyUsage: UsageWindow | undefined;
 	let availableResets: number | undefined;
@@ -220,6 +284,18 @@ export default function (pi: ExtensionAPI) {
 	let invalidateStats: (() => void) | undefined;
 	let gitDelta: GitDelta | null = null;
 	let gitRefreshVersion = 0;
+	let gitRefreshRunning = false;
+	let gitRefreshPending = false;
+	let stopWatching: (() => void) | undefined;
+	let watchVersion = 0;
+
+	function stopRefresh() {
+		watchVersion++;
+		stopWatching?.();
+		stopWatching = undefined;
+		gitRefreshPending = false;
+		gitRefreshVersion++;
+	}
 
 	pi.events.on("subscription-usage/status/v1", (data) => {
 		const event = data as UsageStatus;
@@ -232,12 +308,35 @@ export default function (pi: ExtensionAPI) {
 		requestFooterRender?.();
 	});
 	pi.on("session_shutdown", () => {
+		stopRefresh();
+		requestFooterRender = undefined;
 		weeklyUsage = undefined;
 		availableResets = undefined;
 		nextResetExpiresAt = undefined;
 	});
 
+	// Serialize refreshes and coalesce filesystem/tool events.
 	async function refreshGitDelta(ctx: ExtensionContext): Promise<void> {
+		if (!requestFooterRender) return;
+		if (gitRefreshRunning) {
+			gitRefreshPending = true;
+			return;
+		}
+		gitRefreshRunning = true;
+		try {
+			await readGitDelta(ctx);
+		} catch {
+			// Transient Git/filesystem failures must not reject a background refresh.
+		} finally {
+			gitRefreshRunning = false;
+			if (gitRefreshPending) {
+				gitRefreshPending = false;
+				void refreshGitDelta(ctx);
+			}
+		}
+	}
+
+	async function readGitDelta(ctx: ExtensionContext): Promise<void> {
 		const version = ++gitRefreshVersion;
 		// The :/ pathspec includes the whole repo even when Pi starts in a subdirectory.
 		const untracked = await pi.exec(
@@ -274,7 +373,20 @@ export default function (pi: ExtensionAPI) {
 		requestFooterRender?.();
 	}
 
+	async function startWatching(ctx: ExtensionContext) {
+		const version = watchVersion;
+		const repo = await pi.exec(
+			"git",
+			["rev-parse", "--path-format=absolute", "--show-toplevel", "--absolute-git-dir", "--git-common-dir"],
+			{ cwd: ctx.cwd, timeout: 5000 },
+		);
+		if (version !== watchVersion || !requestFooterRender || repo.code !== 0) return;
+		const [root, ...gitDirs] = repo.stdout.trim().split("\n");
+		if (root) stopWatching = watchGitRepository(root, gitDirs, () => void refreshGitDelta(ctx));
+	}
+
 	pi.on("session_start", (_event, ctx) => {
+		if (ctx.mode !== "tui") return;
 		ctx.ui.setFooter((tui, theme, footerData) => {
 			requestFooterRender = () => tui.requestRender();
 			const stats = sessionStatsReader(ctx);
@@ -329,7 +441,15 @@ export default function (pi: ExtensionAPI) {
 						availableResets,
 						nextResetExpiresAt,
 					);
-					const usageText = usage ? theme.style(usage, { fg: WEEKLY_USAGE_COLOR }) : "";
+					const pace = weeklyPaceDelta(weeklyUsage);
+					const paceText = pace == null
+						? ""
+						: theme.fg(pace > 0 ? "warning" : "success", ` [${pace > 0 ? "+" : ""}${pace}]`);
+					const percentEnd = usage?.indexOf("%") ?? -1;
+					const usageText = usage
+						? theme.style(usage.slice(0, percentEnd + 1), { fg: WEEKLY_USAGE_COLOR }) +
+							paceText + theme.style(usage.slice(percentEnd + 1), { fg: WEEKLY_USAGE_COLOR })
+						: "";
 					const modelDetails = [modelText, thinkingText, fastText, ratesText]
 						.filter(Boolean)
 						.join(" ");
@@ -342,6 +462,7 @@ export default function (pi: ExtensionAPI) {
 					stats.invalidate();
 				},
 				dispose() {
+					stopRefresh();
 					unsubscribe();
 					requestFooterRender = undefined;
 					invalidateStats = undefined;
@@ -349,6 +470,7 @@ export default function (pi: ExtensionAPI) {
 			};
 		});
 
+		void startWatching(ctx).catch(() => {});
 		void refreshGitDelta(ctx);
 	});
 

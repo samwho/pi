@@ -9,12 +9,15 @@ import sessionFooter, {
 	countUntrackedLines,
 	formatWeeklyUsage,
 	sessionStatsReader,
+	weeklyPaceDelta,
+	watchGitRepository,
 } from "./session-footer.ts";
 
 let dir: string | undefined;
 afterEach(async () => {
 	if (dir) await rm(dir, { recursive: true, force: true });
 	dir = undefined;
+	vi.useRealTimers();
 });
 
 it("adds every untracked text line, not a count of files or directories", async () => {
@@ -46,11 +49,13 @@ it("adds every untracked text line, not a count of files or directories", async 
 	expect(await countUntrackedLines(subdir, fromSubdir)).toBe(9);
 });
 
-it("shows live subscription usage to the right of model pricing", () => {
+it("shows live subscription usage to the right of model pricing", async () => {
+	vi.useFakeTimers();
 	let start: any;
 	let footer: any;
 	let usageChanged: any;
 	const statuses = new Map<string, string>();
+	const fg = vi.fn((_color: string, text: string) => text);
 	const style = vi.fn((text: string, options: Parameters<typeof styleText>[1]) => {
 		// Concrete colors must be Color objects, not strings treated as theme tokens.
 		expect(typeof options.fg).toBe("object");
@@ -69,6 +74,7 @@ it("shows live subscription usage to the right of model pricing", () => {
 		exec: vi.fn(async () => ({ code: 1, stdout: "", stderr: "" })),
 	} as unknown as ExtensionAPI;
 	const ctx = {
+		mode: "tui",
 		cwd: "/tmp",
 		model: { provider: "openai", id: "gpt-6.1-sol", cost: { input: 5, output: 20 } },
 		sessionManager: { getLeafId: () => null, getEntries: () => [] },
@@ -77,7 +83,7 @@ it("shows live subscription usage to the right of model pricing", () => {
 			setFooter: (factory: any) => {
 				footer = factory(
 					{ requestRender: vi.fn() },
-					{ fg: (_color: string, text: string) => text, style },
+					{ fg, style },
 					{ getExtensionStatuses: () => statuses, onBranchChange: () => () => {} },
 				);
 			},
@@ -85,6 +91,10 @@ it("shows live subscription usage to the right of model pricing", () => {
 	};
 	sessionFooter(pi);
 	start({}, ctx);
+	await vi.advanceTimersByTimeAsync(0);
+	const initialPolls = vi.mocked(pi.exec).mock.calls.length;
+	await vi.advanceTimersByTimeAsync(1000);
+	expect(vi.mocked(pi.exec).mock.calls.length).toBe(initialPolls);
 	const original = footer.render(100);
 	expect(original).toHaveLength(1);
 	usageChanged({
@@ -95,14 +105,14 @@ it("shows live subscription usage to the right of model pricing", () => {
 		],
 	});
 	expect(footer.render(100)).toHaveLength(1);
-	expect(footer.render(100)[0]).toMatch(/sol off \$5\/\$20 15% 3d$/);
-	expect(style).toHaveBeenCalledWith("15% 3d", { fg: parseColor("#60a5fa") });
+	expect(footer.render(100)[0]).toMatch(/sol off \$5\/\$20 15% \[-42\] 3d$/);
+	expect(style).toHaveBeenCalledWith("15%", { fg: parseColor("#60a5fa") });
 	usageChanged({
 		status: "ready",
 		availableResets: 2,
 		windows: [{ kind: "weekly", usedPercent: 15, resetsAt: Date.now() / 1000 + 3 * 86400 }],
 	});
-	expect(footer.render(100)[0]).toMatch(/15% 3d \[2\]$/);
+	expect(footer.render(100)[0]).toMatch(/15% \[-42\] 3d \[2\]$/);
 	usageChanged({
 		status: "ready",
 		availableResets: 2,
@@ -110,12 +120,61 @@ it("shows live subscription usage to the right of model pricing", () => {
 		windows: [{ kind: "weekly", usedPercent: 15 }],
 	});
 	expect(footer.render(100)[0]).toMatch(/15% \[2 5d\]$/);
+	usageChanged({
+		status: "ready",
+		windows: [{ kind: "weekly", usedPercent: 38, resetsAt: Date.now() / 1000 + 6 * 86400 }],
+	});
+	expect(footer.render(100)[0]).toMatch(/38% \[\+24\] 6d$/);
+	expect(fg).toHaveBeenCalledWith("warning", " [+24]");
 	usageChanged({ status: "ready", windows: [{ kind: "weekly", usedPercent: 20 }] });
 	expect(footer.render(100)[0]).toMatch(/\$5\/\$20 20%$/);
 	for (const line of footer.render(8)) expect(visibleWidth(line)).toBeLessThanOrEqual(8);
 	usageChanged({ status: "unavailable" });
 	expect(footer.render(100)).toEqual(original);
 	footer.dispose();
+	const pollsAtDisposal = vi.mocked(pi.exec).mock.calls.length;
+	await vi.advanceTimersByTimeAsync(5000);
+	expect(vi.mocked(pi.exec).mock.calls.length).toBe(pollsAtDisposal);
+});
+
+it("watches repository changes and Git metadata, debounces saves, and stops on disposal", async () => {
+	dir = await mkdtemp(join(tmpdir(), "pi-footer-watch-"));
+	const gitDir = join(dir, ".git");
+	await mkdir(gitDir);
+	const changed = vi.fn();
+	const stop = watchGitRepository(dir, [gitDir], changed);
+	try {
+		await writeFile(join(dir, "file.txt"), "one\n");
+		await writeFile(join(dir, "file.txt"), "two\n");
+		await vi.waitFor(() => expect(changed).toHaveBeenCalledTimes(1));
+		await writeFile(join(gitDir, "index"), "staged");
+		await vi.waitFor(() => expect(changed).toHaveBeenCalledTimes(2));
+		await writeFile(join(gitDir, "index.lock"), "lock");
+		await new Promise((resolve) => setTimeout(resolve, 250));
+		expect(changed).toHaveBeenCalledTimes(2);
+		stop();
+		await writeFile(join(dir, "file.txt"), "three\n");
+		await new Promise((resolve) => setTimeout(resolve, 250));
+		expect(changed).toHaveBeenCalledTimes(2);
+	} finally {
+		stop();
+	}
+});
+
+it("compares quota used with elapsed time in the provider's weekly window", () => {
+	const now = 1_900_000_000_000;
+	const week = 7 * 86400;
+	const window = { kind: "weekly", usedPercent: 38, resetsAt: now / 1000 + 6 * 86400 };
+	expect(weeklyPaceDelta(window, now)).toBe(24);
+	expect(weeklyPaceDelta({ ...window, resetsAt: now / 1000 + week / 2 }, now)).toBe(-12);
+	expect(weeklyPaceDelta({ ...window, usedPercent: 50, resetsAt: now / 1000 + week / 2 }, now)).toBe(0);
+	expect(weeklyPaceDelta({ ...window, resetsAt: now / 1000 + week }, now)).toBe(38);
+	expect(weeklyPaceDelta(window, now + 86400 * 1000)).toBe(9);
+	for (const resetsAt of [undefined, NaN, Infinity, now / 1000, now / 1000 - 1, now / 1000 + week + 1]) {
+		expect(weeklyPaceDelta({ ...window, resetsAt }, now)).toBeUndefined();
+	}
+	expect(weeklyPaceDelta(undefined, now)).toBeUndefined();
+	expect(weeklyPaceDelta({ ...window, usedPercent: NaN }, now)).toBeUndefined();
 });
 
 it("formats used percentage and a single rounded-up reset unit", () => {
