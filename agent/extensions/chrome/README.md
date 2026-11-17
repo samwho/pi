@@ -62,9 +62,9 @@ through the display stats entries; old absent counts remain explicitly unknown.
   Chained commands/pipelines get AST-selected continuation breaks before formatting.
 - Shiki's Bash TextMate grammar with GitHub dark/light palettes highlights flags,
   strings, variables, operators, and other syntax.
-- Literal command positions come from shfmt's AST. Built-ins, script functions,
-  and executable files found on PATH or in the local working directory are green;
-  unresolved literal commands are red.
+- Command positions and static environment snapshots come from shfmt's AST.
+  Built-ins, known functions, and found executables are green. Confidently missing
+  commands are red. Uncertain resolution uses the neutral output colour.
 - Commands appear in full beneath the tool heading. Long lines wrap, never truncate.
 - Bash headings show the configured timeout, live elapsed execution time, and
   estimated output tokens once output is available. Codemode also shows live
@@ -75,12 +75,23 @@ through the display stats entries; old absent counts remain explicitly unknown.
 - Formatting/highlighting run asynchronously and are cached. Incomplete input or
   formatter failure keeps the original source visible. Source is never evaluated.
 
-Command lookup checks the local directory as well as PATH, including relative
-binary paths. Literal `cd` in straight-line statements and successful `&&` chains
-updates the lookup directory; subshell, function, and pipeline changes stay scoped.
-This is a display hint, not Bash command-resolution validation: bare local names
-are accepted even if `.` is not on PATH. Dynamic directories, PATH assignments,
-aliases, startup functions, and dynamically computed command names are not simulated. Source and execution arguments remain unchanged. The formatter binary is
+`shell-environment.ts` statically tracks directory and PATH changes in straight-line
+statements and successful `&&` chains. It handles `export PATH=...`, standalone
+assignments/appends, and temporary `PATH=... command` prefixes. Simple `$HOME`,
+`$PATH`, `$PWD`, `$OLDPWD` and braced references are expanded without running a
+shell. Temporary assignments do not leak into later calls; subshell and substitution
+changes stay scoped. Lookup caches distinguish effective directories, PATH values,
+and uncertainty, rather than using only Pi's inherited PATH.
+
+Sources, eval, dynamic assignments, unknown directories, function calls, and
+ambiguous control flow make affected resolution uncertain instead of falsely red.
+`BASH_ENV` startup configuration is also treated as unknown, never sourced. Static
+absolute paths can still resolve, as can binaries in a recovered directory/PATH.
+
+This remains a display hint, not full Bash validation: bare local names are
+accepted even if `.` is not on PATH. Arbitrary variable expansions, shell startup
+code, aliases, and dynamically computed commands are not executed to inspect them.
+Source and execution arguments remain unchanged. The formatter binary is
 resolved in mise's data directory at its pinned version, so it also works before a
 running Pi process receives a refreshed PATH. Update `shell.ts` if changing that pin.
 
