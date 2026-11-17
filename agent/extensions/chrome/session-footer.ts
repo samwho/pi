@@ -1,0 +1,537 @@
+import { homedir } from "node:os";
+import { watch, type FSWatcher } from "node:fs";
+import { lstat, open } from "node:fs/promises";
+import { join, relative } from "node:path";
+import { FAST_COST_MULTIPLIER } from "../fast-mode.ts";
+import { isOpenAIProvider } from "../shared/openai.ts";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { parseColor, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+
+type StatusColor = "success" | "warning" | "error";
+type GitDelta = { additions: number; deletions: number };
+
+// Rates in Pi's model catalogue are USD per million tokens. The highest of
+// input/output is used so an expensive output price is not hidden by cheap input.
+const CHEAP_PRICE = 5;
+const EXPENSIVE_PRICE = 20;
+const WEEKLY_USAGE_COLOR = parseColor("#60a5fa");
+
+function sessionCost(ctx: ExtensionContext): number {
+	let cost = 0;
+
+	for (const entry of ctx.sessionManager.getEntries()) {
+		if (entry.type === "message" && entry.message.role === "assistant") {
+			cost += entry.message.usage.cost.total;
+		} else if (entry.type === "message" && entry.message.role === "toolResult") {
+			cost += entry.message.usage?.cost.total ?? 0;
+		} else if (entry.type === "compaction" || entry.type === "branch_summary") {
+			cost += entry.usage?.cost.total ?? 0;
+		}
+	}
+
+	return cost;
+}
+
+/** Session entries are append-only; scrolling doesn't change the leaf or model. */
+export function sessionStatsReader(ctx: ExtensionContext) {
+	let cached:
+		| {
+				leaf: string | null;
+				model: ExtensionContext["model"];
+				context: ReturnType<ExtensionContext["getContextUsage"]>;
+				cost: number;
+		  }
+		| undefined;
+	return {
+		read() {
+			const leaf = ctx.sessionManager.getLeafId();
+			const model = ctx.model;
+			if (!cached || cached.leaf !== leaf || cached.model !== model) {
+				cached = { leaf, model, context: ctx.getContextUsage(), cost: sessionCost(ctx) };
+			}
+			return cached;
+		},
+		invalidate() {
+			cached = undefined;
+		},
+	};
+}
+
+function priceColor(input: number | undefined, output: number | undefined): StatusColor {
+	const rates = [input, output].filter(
+		(rate): rate is number => typeof rate === "number" && Number.isFinite(rate),
+	);
+	if (rates.length === 0) return "warning";
+
+	const highestRate = Math.max(...rates);
+	if (highestRate <= CHEAP_PRICE) return "success";
+	if (highestRate <= EXPENSIVE_PRICE) return "warning";
+	return "error";
+}
+
+function thinkingColor(level: string): StatusColor {
+	if (level === "off" || level === "minimal" || level === "low") return "success";
+	if (level === "medium") return "warning";
+	return "error";
+}
+
+function contextColor(percent: number | null | undefined): StatusColor | undefined {
+	if (percent == null || !Number.isFinite(percent)) return undefined;
+	if (percent >= 90) return "error";
+	if (percent >= 70) return "warning";
+	return "success";
+}
+
+function formatRate(rate: number | undefined): string {
+	if (typeof rate !== "number" || !Number.isFinite(rate)) return "?";
+	if (Number.isInteger(rate)) return rate.toFixed(0);
+	return rate < 10 ? rate.toFixed(2) : rate.toFixed(0);
+}
+
+function effectiveRate(rate: number | undefined, fastEnabled: boolean): number | undefined {
+	if (!fastEnabled || typeof rate !== "number" || !Number.isFinite(rate)) return rate;
+	return rate * FAST_COST_MULTIPLIER;
+}
+
+function displayCwd(
+	cwd: string,
+	shortened: (text: string) => string,
+	normal: (text: string) => string,
+): string {
+	const home = homedir();
+	const display =
+		cwd === home ? "~" : cwd.startsWith(`${home}/`) ? `~${cwd.slice(home.length)}` : cwd;
+	const prefix = display.startsWith("~/") ? "~/" : display.startsWith("/") ? "/" : "";
+	const segments = display.slice(prefix.length).split("/").filter(Boolean);
+
+	if (segments.length <= 2) return normal(display);
+
+	return (
+		normal(prefix) +
+		segments
+			.map((segment, index) =>
+				index < segments.length - 2 ? shortened(segment.slice(0, 2)) : normal(segment),
+			)
+			.join(normal("/"))
+	);
+}
+
+function parseNumstat(output: string): Pick<GitDelta, "additions" | "deletions"> {
+	let additions = 0;
+	let deletions = 0;
+
+	for (const line of output.split("\n")) {
+		const [added, deleted] = line.split("\t", 2);
+		if (added && added !== "-") additions += Number.parseInt(added, 10) || 0;
+		if (deleted && deleted !== "-") deletions += Number.parseInt(deleted, 10) || 0;
+	}
+
+	return { additions, deletions };
+}
+
+// Match Git's numstat convention: empty and binary files add no text lines;
+// a non-empty last line counts even without a trailing newline.
+async function countNewFileLines(path: string): Promise<number> {
+	try {
+		const stat = await lstat(path);
+		if (stat.isSymbolicLink()) return 1;
+		if (!stat.isFile()) return 0;
+
+		const file = await open(path, "r");
+		try {
+			const buffer = Buffer.allocUnsafe(64 * 1024);
+			let bytes = 0;
+			let lines = 0;
+			let endsInNewline = false;
+			while (true) {
+				const { bytesRead } = await file.read(buffer, 0, buffer.length, null);
+				if (!bytesRead) break;
+				if (bytes < 8_000 && buffer.subarray(0, Math.min(bytesRead, 8_000 - bytes)).includes(0))
+					return 0;
+				for (let i = 0; i < bytesRead; i++) if (buffer[i] === 10) lines++;
+				endsInNewline = buffer[bytesRead - 1] === 10;
+				bytes += bytesRead;
+			}
+			return lines + (bytes > 0 && !endsInNewline ? 1 : 0);
+		} finally {
+			await file.close();
+		}
+	} catch {
+		// A file may disappear between Git listing it and us opening it.
+		return 0;
+	}
+}
+
+export async function countUntrackedLines(cwd: string, output: string): Promise<number> {
+	let additions = 0;
+	for (const path of output.split("\0")) {
+		if (path) additions += await countNewFileLines(join(cwd, path));
+	}
+	return additions;
+}
+
+function modelLabel(provider: string | undefined, id: string | undefined): string {
+	if (!id) return "no model";
+	return isOpenAIProvider(provider) ? id.replace(/^gpt-\d+(?:\.\d+)*-/, "") : id;
+}
+
+type UsageWindow = { kind: string; usedPercent: number; resetsAt?: number };
+type UsageStatus = {
+	status: string;
+	windows?: UsageWindow[];
+	availableResets?: number;
+	nextResetExpiresAt?: number;
+};
+
+function formatCountdown(timestamp: number | undefined, now: number): string | undefined {
+	const remaining = (timestamp ?? 0) * 1000 - now;
+	if (!Number.isFinite(remaining) || remaining <= 0) return undefined;
+	const hour = 60 * 60 * 1000;
+	const day = 24 * hour;
+	return remaining > day
+		? `${Math.ceil(remaining / day)}d`
+		: remaining >= hour
+			? `${Math.ceil(remaining / hour)}h`
+			: `${Math.ceil(remaining / (60 * 1000))}m`;
+}
+
+export function formatWeeklyUsage(
+	window: UsageWindow | undefined,
+	now = Date.now(),
+	availableResets?: number,
+	nextResetExpiresAt?: number,
+): string | undefined {
+	if (!window || !Number.isFinite(window.usedPercent)) return undefined;
+	const percent = `${Math.round(window.usedPercent)}%`;
+	const expiry = formatCountdown(nextResetExpiresAt, now);
+	const resets =
+		typeof availableResets === "number" &&
+		Number.isSafeInteger(availableResets) &&
+		availableResets > 0
+			? ` [${availableResets}${expiry ? ` ${expiry}` : ""}]`
+			: "";
+	const countdown = formatCountdown(window.resetsAt, now);
+	return `${percent}${countdown ? ` ${countdown}` : ""}${resets}`;
+}
+
+/** Positive means usage exceeds the allowance: 20% per local weekday, zero on weekends. */
+export function weeklyPaceDelta(
+	window: UsageWindow | undefined,
+	now = Date.now(),
+): number | undefined {
+	if (
+		!window ||
+		!Number.isFinite(window.usedPercent) ||
+		typeof window.resetsAt !== "number" ||
+		!Number.isFinite(window.resetsAt)
+	)
+		return undefined;
+	const reset = window.resetsAt * 1000;
+	const start = new Date(reset);
+	start.setDate(start.getDate() - 7);
+	// Calendar days preserve local weekday allocations across daylight-saving changes.
+	if (
+		!Number.isFinite(now) ||
+		!Number.isFinite(start.getTime()) ||
+		now < start.getTime() ||
+		now >= reset
+	)
+		return undefined;
+	let elapsedPercent = 0;
+	let cursor = start.getTime();
+	while (cursor < now) {
+		const day = new Date(cursor);
+		day.setHours(0, 0, 0, 0);
+		const nextDay = new Date(day);
+		nextDay.setDate(nextDay.getDate() + 1);
+		const end = Math.min(now, nextDay.getTime());
+		if (day.getDay() !== 0 && day.getDay() !== 6) {
+			elapsedPercent += (20 * (end - cursor)) / (nextDay.getTime() - day.getTime());
+		}
+		cursor = end;
+	}
+	return Math.round(window.usedPercent - elapsedPercent) || 0;
+}
+
+/** Native filesystem notifications, coalesced across editor saves and Git operations. */
+export function watchGitRepository(
+	root: string,
+	gitDirs: string[],
+	onChange: () => void,
+): () => void {
+	const watchers: FSWatcher[] = [];
+	let debounce: ReturnType<typeof setTimeout> | undefined;
+	const changed = () => {
+		clearTimeout(debounce);
+		debounce = setTimeout(onChange, 150);
+		debounce.unref();
+	};
+	const addWatcher = (path: string, metadata: boolean) => {
+		try {
+			const watcher = watch(path, { recursive: true }, (_event, filename) => {
+				const name = filename?.toString();
+				const parts = name?.split(/[\\/]/);
+				if (parts) {
+					if (metadata) {
+						if (!["HEAD", "index", "packed-refs", "refs"].includes(parts[0])) return;
+						if (parts.at(-1)?.endsWith(".lock")) return;
+					} else {
+						if (parts.some((part) => [".git", "node_modules"].includes(part))) return;
+						// Linked worktrees can store Git metadata outside .git.
+						if (
+							gitDirs.some((dir) => {
+								const rel = relative(dir, join(root, name ?? ""));
+								return rel === "" || (!rel.startsWith("..") && !rel.startsWith("/"));
+							})
+						)
+							return;
+					}
+				}
+				changed();
+			});
+			watcher.on("error", () => watcher.close());
+			watcher.unref();
+			watchers.push(watcher);
+		} catch {
+			// Unsupported/missing watch paths still get tool-triggered refreshes.
+		}
+	};
+	addWatcher(root, false);
+	for (const dir of new Set(gitDirs)) addWatcher(dir, true);
+	return () => {
+		clearTimeout(debounce);
+		for (const watcher of watchers) watcher.close();
+	};
+}
+
+export default function (pi: ExtensionAPI) {
+	let usageLoading = false;
+	let weeklyUsage: UsageWindow | undefined;
+	let availableResets: number | undefined;
+	let nextResetExpiresAt: number | undefined;
+	let requestFooterRender: (() => void) | undefined;
+	let invalidateStats: (() => void) | undefined;
+	let gitDelta: GitDelta | null = null;
+	let gitRefreshVersion = 0;
+	let gitRefreshRunning = false;
+	let gitRefreshPending = false;
+	let stopWatching: (() => void) | undefined;
+	let watchVersion = 0;
+
+	function stopRefresh() {
+		watchVersion++;
+		stopWatching?.();
+		stopWatching = undefined;
+		gitRefreshPending = false;
+		gitRefreshVersion++;
+	}
+
+	pi.events.on("subscription-usage/status/v1", (data) => {
+		const event = data as UsageStatus;
+		usageLoading = event.status === "loading";
+		if (usageLoading) {
+			requestFooterRender?.();
+			return;
+		}
+		availableResets = event.status === "ready" ? event.availableResets : undefined;
+		nextResetExpiresAt = event.status === "ready" ? event.nextResetExpiresAt : undefined;
+		weeklyUsage =
+			event.status === "ready"
+				? event.windows?.find((window) => window.kind === "weekly")
+				: undefined;
+		requestFooterRender?.();
+	});
+	pi.on("session_shutdown", () => {
+		stopRefresh();
+		requestFooterRender = undefined;
+		usageLoading = false;
+		weeklyUsage = undefined;
+		availableResets = undefined;
+		nextResetExpiresAt = undefined;
+	});
+
+	// Serialize refreshes and coalesce filesystem/tool events.
+	async function refreshGitDelta(ctx: ExtensionContext): Promise<void> {
+		if (!requestFooterRender) return;
+		if (gitRefreshRunning) {
+			gitRefreshPending = true;
+			return;
+		}
+		gitRefreshRunning = true;
+		try {
+			await readGitDelta(ctx);
+		} catch {
+			// Transient Git/filesystem failures must not reject a background refresh.
+		} finally {
+			gitRefreshRunning = false;
+			if (gitRefreshPending) {
+				gitRefreshPending = false;
+				void refreshGitDelta(ctx);
+			}
+		}
+	}
+
+	async function readGitDelta(ctx: ExtensionContext): Promise<void> {
+		const version = ++gitRefreshVersion;
+		// The :/ pathspec includes the whole repo even when Pi starts in a subdirectory.
+		const untracked = await pi.exec(
+			"git",
+			["ls-files", "--others", "--exclude-standard", "-z", "--", ":/"],
+			{
+				cwd: ctx.cwd,
+				timeout: 5000,
+			},
+		);
+
+		if (version !== gitRefreshVersion) return;
+		if (untracked.code !== 0) {
+			gitDelta = null;
+			requestFooterRender?.();
+			return;
+		}
+
+		const hasHead =
+			(
+				await pi.exec("git", ["rev-parse", "--verify", "HEAD"], {
+					cwd: ctx.cwd,
+					timeout: 5000,
+				})
+			).code === 0;
+		const diffArgs = hasHead ? ["diff", "--numstat", "HEAD"] : ["diff", "--cached", "--numstat"];
+		const diff = await pi.exec("git", diffArgs, { cwd: ctx.cwd, timeout: 5000 });
+
+		if (version !== gitRefreshVersion) return;
+		const delta = diff.code === 0 ? parseNumstat(diff.stdout) : { additions: 0, deletions: 0 };
+		const untrackedLines = await countUntrackedLines(ctx.cwd, untracked.stdout);
+		if (version !== gitRefreshVersion) return;
+		gitDelta = { additions: delta.additions + untrackedLines, deletions: delta.deletions };
+		requestFooterRender?.();
+	}
+
+	async function startWatching(ctx: ExtensionContext) {
+		const version = watchVersion;
+		const repo = await pi.exec(
+			"git",
+			[
+				"rev-parse",
+				"--path-format=absolute",
+				"--show-toplevel",
+				"--absolute-git-dir",
+				"--git-common-dir",
+			],
+			{ cwd: ctx.cwd, timeout: 5000 },
+		);
+		if (version !== watchVersion || !requestFooterRender || repo.code !== 0) return;
+		const [root, ...gitDirs] = repo.stdout.trim().split("\n");
+		if (root) stopWatching = watchGitRepository(root, gitDirs, () => void refreshGitDelta(ctx));
+	}
+
+	pi.on("session_start", (_event, ctx) => {
+		if (ctx.mode !== "tui") return;
+		ctx.ui.setFooter((tui, theme, footerData) => {
+			requestFooterRender = () => tui.requestRender();
+			const stats = sessionStatsReader(ctx);
+			invalidateStats = () => stats.invalidate();
+			const unsubscribe = footerData.onBranchChange(() => tui.requestRender());
+
+			return {
+				render(width: number): string[] {
+					const { context, cost } = stats.read();
+					const contextPercent = context?.percent;
+					const contextLabel = contextPercent == null ? "?" : `${contextPercent.toFixed(1)}%`;
+					const contextStatusColor = contextColor(contextPercent);
+					const contextText = contextStatusColor
+						? theme.fg(contextStatusColor, contextLabel)
+						: theme.fg("dim", contextLabel);
+					const cwdText = displayCwd(
+						ctx.cwd,
+						(text) => theme.fg("dim", text),
+						(text) => theme.fg("accent", text),
+					);
+					const deltaText = gitDelta
+						? [
+								theme.fg(gitDelta.additions ? "success" : "dim", `+${gitDelta.additions}`),
+								theme.fg(gitDelta.deletions ? "error" : "dim", `-${gitDelta.deletions}`),
+							]
+								.filter(Boolean)
+								.join(" ")
+						: "";
+					const divider = theme.fg("dim", "|");
+					const left = [cwdText, deltaText, contextText, theme.fg("dim", `$${cost.toFixed(2)}`)]
+						.filter(Boolean)
+						.join(` ${divider} `);
+
+					const model = ctx.model;
+					const fastEnabled = footerData.getExtensionStatuses().has("pi-gpt-fast-mode");
+					const inputRate = effectiveRate(model?.cost?.input, fastEnabled);
+					const outputRate = effectiveRate(model?.cost?.output, fastEnabled);
+					const displayedModel = modelLabel(model?.provider, model?.id);
+					const modelText = theme.fg(
+						model ? priceColor(inputRate, outputRate) : "dim",
+						displayedModel,
+					);
+					const thinkingLevel = model?.reasoning ? (ctx.thinkingLevel ?? "off") : "off";
+					const thinkingText = theme.fg(thinkingColor(thinkingLevel), thinkingLevel);
+					const ratesText = model
+						? theme.fg("dim", `$${formatRate(inputRate)}/$${formatRate(outputRate)}`)
+						: "";
+					const fastText = fastEnabled ? theme.fg("warning", "fast") : "";
+					const usage = formatWeeklyUsage(
+						weeklyUsage,
+						Date.now(),
+						availableResets,
+						nextResetExpiresAt,
+					);
+					const pace = weeklyPaceDelta(weeklyUsage);
+					const paceText =
+						pace == null
+							? ""
+							: theme.fg(pace > 0 ? "warning" : "success", ` [${pace > 0 ? "+" : ""}${pace}]`);
+					const percentEnd = usage?.indexOf("%") ?? -1;
+					const usageText = usage
+						? theme.style(usage.slice(0, percentEnd + 1), { fg: WEEKLY_USAGE_COLOR }) +
+							paceText +
+							theme.style(usage.slice(percentEnd + 1), { fg: WEEKLY_USAGE_COLOR })
+						: usageLoading
+							? theme.fg("dim", "loading...")
+							: "";
+					const modelDetails = [modelText, thinkingText, fastText, ratesText]
+						.filter(Boolean)
+						.join(" ");
+					const right = [modelDetails, usageText].filter(Boolean).join(" ");
+					const padding = " ".repeat(Math.max(2, width - visibleWidth(left) - visibleWidth(right)));
+
+					return [truncateToWidth(left + padding + right, width)];
+				},
+				invalidate() {
+					stats.invalidate();
+				},
+				dispose() {
+					stopRefresh();
+					unsubscribe();
+					requestFooterRender = undefined;
+					invalidateStats = undefined;
+				},
+			};
+		});
+
+		void startWatching(ctx).catch(() => {});
+		void refreshGitDelta(ctx);
+	});
+
+	pi.on("tool_execution_end", (event, ctx) => {
+		if (event.toolName === "bash" || event.toolName === "write" || event.toolName === "edit") {
+			void refreshGitDelta(ctx);
+		}
+	});
+
+	// These changes can happen without a message being added to the branch.
+	const refreshStats = () => {
+		invalidateStats?.();
+		requestFooterRender?.();
+	};
+	pi.on("model_select", refreshStats);
+	pi.on("thinking_level_select", () => requestFooterRender?.());
+	pi.on("turn_start", refreshStats);
+	pi.on("turn_end", refreshStats);
+}

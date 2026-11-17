@@ -13,3 +13,4 @@ pnpm = { version = "latest", auto_update = true }
 biome = { version = "latest", auto_update = true }
 oxlint = "1.89.0"
 oxfmt = "0.74.0"
+shfmt = "3.14.1"

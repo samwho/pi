@@ -46,11 +46,16 @@ Pi reads this checkout through its standard paths:
 | Path | Purpose |
 | --- | --- |
 | `agent/settings.json` | Global Pi settings and installed packages. |
-| `agent/extensions/` | Local Pi extensions. |
+| `agent/extensions/` | Local Pi extensions; `chrome/` provides compact tool activity. |
 | `agent/skills/` | Local skills maintained by this repository. |
 | `agent/APPEND_SYSTEM.md` | Additional global agent instructions. |
 | `agent/mcp.json` | Built-in MCP server configuration. |
 | `mise.toml` | Pi and shared CLI tool installation. |
+
+Tool calls use the fresh [`chrome`](agent/extensions/chrome/README.md) renderer:
+compact activity, an indented list of nested codemode calls, formatted and
+highlighted Bash commands, and details on expansion. It replaces the old `visuals/` extension entirely. Restart
+Pi once after this replacement; the old extension's patches survive `/reload`.
 
 Credentials, sessions, installed package contents, and other mutable state are
 ignored by Git and remain under `~/.pi/agent` on the host.
