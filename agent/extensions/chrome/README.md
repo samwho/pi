@@ -40,8 +40,10 @@ unchanged and does not change normal assistant Markdown.
 
 Successful output stays hidden. Click or use the tool expansion shortcut (normally
 Ctrl+O) for arguments, diffs, and output. Failures show a short excerpt. Pi handles
-images. The original custom bottom bar lives in `session-footer.ts`; the built-in
-header and working indicator are left alone.
+images. The original custom bottom bar lives in `session-footer.ts` and the original
+new-session header in `welcome-header.ts`. The header shows resource counts,
+system/host/time, working directory, and a random quote from
+`https://quotes.samwho.dev/random`. The built-in working indicator is left alone.
 
 Live nested results are captured only from finalized `tool_execution_end` events,
 after result middleware such as secret redaction. Bounded, session-local storage
@@ -100,22 +102,40 @@ its own module under `formatters/`, then import it and add it to that list. Remo
 it from the list to restore the generic display. Tool names match exactly, with
 hyphens and underscores normalised for native/identifier-safe MCP spellings.
 
-A module exports a `ToolFormatter` (`formatters/types.ts`):
+A module exports a `ToolFormatter`, or an array of formatters for a service family
+(`formatters/types.ts`). Families are spread into the central enable/disable list:
 
 - `tools`: the tool names it handles.
-- `call(args)`: optional plain-text `{ label, subject }` for the heading.
-- `result(result)`: optional plain-text `{ summary }` for successful results.
+- `call(args, { name })`: optional plain-text `{ label, subject }` for the heading.
+- `result(result, { name, args, tokens })`: optional plain-text `{ summary, subject? }`.
+  The optional returned subject replaces an opaque argument ID with a title/name.
+  `tokens` is Pi's output-token estimate. Summaries appear on successful calls;
+  errors retain the shared error display.
 - `unavailableSummary`: optional placeholder for historical calls without results.
 
 Callbacks are pure display transformations, not tool overrides. Return `undefined`
 for unsupported shapes; thrown callbacks also fall back to generic rendering.
 The shared renderer keeps status/spinners, indentation, background, truncation,
 reserved summary space, errors, images, and expansion. Both direct and nested calls
-use this path. Short sanitised result summaries (up to 256 characters) are saved
-with the existing hidden stats metadata, so future nested calls survive reload.
+use this path. Short sanitised result summaries (up to 256 characters) and resolved
+subjects (up to 512) are saved with the existing hidden stats metadata, so future
+nested calls retain their useful names and outcomes after reload.
 
-The first module, `slack-search.ts`, handles public and public/private message
-searches. It displays keywords plus filters (or the older query/semantic query
+The modules cover the 76 actual tool names found in the two-week history audit:
+
+- `cloud.ts`: Laravel Cloud and its separately labelled personal connection.
+- `knowledge.ts`: Linear issues and Notion search/read/update/create/access.
+- `research.ts`: Drew document search/read and Atuin history/thread/output tools.
+- `slack-search.ts`, `slack-read.ts`: Slack search, threads, and files.
+- `toolbox.ts`: management discovery, calls, and explicit validation-only display.
+- `shared.ts`: conservative payload decoding, returned-item counts, pagination,
+  safe resource references, and secret-safe changed-field labels.
+
+See [MCP-RENDERERS.md](MCP-RENDERERS.md) for the audit, per-tool counts, safety
+conventions, and illustrated output. No historical commands or remote mutations
+were replayed. Unknown or newly introduced tools still use the generic renderer.
+
+`slack-search.ts` handles public and public/private message searches. It displays keywords plus filters (or the older query/semantic query
 fields), then the number of returned results, including zero:
 
 ```text

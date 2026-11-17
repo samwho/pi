@@ -14,6 +14,7 @@ import {
 import { ShellRenderer } from "./shell.ts";
 import { CallHighlighting } from "./call-highlighting.ts";
 import registerSessionFooter from "./session-footer.ts";
+import registerWelcomeHeader from "./welcome-header.ts";
 import { installToolGrouping } from "./tool-layout.ts";
 
 const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -24,6 +25,7 @@ type RowState = { result?: Result; startedAt?: number; durationMs?: number };
 /** Display-only: the same renderer handles direct, nested, live, and restored calls. */
 export default function chrome(pi: ExtensionAPI): void {
 	registerSessionFooter(pi);
+	registerWelcomeHeader(pi);
 	const stopGrouping = installToolGrouping();
 	// Consecutive thinking summaries stay visible as one naturally wrapping paragraph.
 	// This changes display only, including streamed and restored thinking runs.
@@ -93,6 +95,7 @@ export default function chrome(pi: ExtensionAPI): void {
 								: undefined,
 						limited: stats.limited === true,
 						summary: typeof stats.summary === "string" ? stats.summary.slice(0, 256) : undefined,
+						subject: typeof stats.subject === "string" ? stats.subject.slice(0, 512) : undefined,
 					});
 			}
 		}
@@ -201,7 +204,7 @@ export default function chrome(pi: ExtensionAPI): void {
 		const stats =
 			event.isError && event.toolName !== "bash" && event.toolName !== "codemode"
 				? undefined
-				: resultStats(event.toolName, event.result as Result);
+				: resultStats(event.toolName, event.result as Result, previous?.args);
 		if (stats) {
 			savedStats.set(event.toolCallId, stats);
 			// Compact display stats/formatter summaries only, never raw results.

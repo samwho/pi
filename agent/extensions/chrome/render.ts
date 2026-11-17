@@ -18,7 +18,13 @@ export type Result = {
 	details?: unknown;
 	structuredContent?: unknown;
 };
-export type ResultStats = { tokens: number; matches?: number; limited?: boolean; summary?: string };
+export type ResultStats = {
+	tokens: number;
+	matches?: number;
+	limited?: boolean;
+	summary?: string;
+	subject?: string;
+};
 export type ToolView = {
 	id: string;
 	name: string;
@@ -152,22 +158,24 @@ function grepCount(result: Result): { matches: number; limited: boolean } {
 	return { matches: count, limited };
 }
 const RESULT_STATS = new WeakMap<Result, ResultStats>();
-export function resultStats(name: string, result: Result): ResultStats | undefined {
+export function resultStats(name: string, result: Result, args?: unknown): ResultStats | undefined {
 	const builtin = name === "read" || name === "grep" || name === "bash" || name === "codemode";
 	const formatter = toolFormatter(name);
 	if (!builtin && !formatter?.result) return undefined;
 	const cached = RESULT_STATS.get(result);
 	if (cached) return cached;
-	let custom: { summary: string } | undefined;
+	const tokens = payloadTokens(result.content);
+	let custom: { summary: string; subject?: string } | undefined;
 	try {
-		custom = formatter?.result?.(result);
+		custom = formatter?.result?.(result, { name, args: record(args), tokens });
 	} catch {
 		/* Unsupported/broken formatters keep the generic view. */
 	}
 	if (!builtin && !custom) return undefined;
 	const stats = {
-		tokens: payloadTokens(result.content),
+		tokens,
 		...(name === "grep" ? grepCount(result) : {}),
+		subject: typeof custom?.subject === "string" ? inline(custom.subject).slice(0, 512) : undefined,
 		summary: typeof custom?.summary === "string" ? inline(custom.summary).slice(0, 256) : undefined,
 	};
 	RESULT_STATS.set(result, stats);
@@ -224,7 +232,8 @@ function summary(view: ToolView, theme: Theme): string {
 	if (view.status !== "success") return "";
 	const formatter = toolFormatter(view.name);
 	if (formatter) {
-		const stats = view.stats ?? (view.result ? resultStats(view.name, view.result) : undefined);
+		const stats =
+			view.stats ?? (view.result ? resultStats(view.name, view.result, view.args) : undefined);
 		const custom = stats?.summary ?? (!view.result ? formatter.unavailableSummary : undefined);
 		if (custom !== undefined) return theme.fg("muted", inline(custom));
 	}
@@ -306,12 +315,17 @@ export function renderTool(
 	const args = record(view.args);
 	let customCall: { label?: string; subject?: string } | undefined;
 	try {
-		customCall = toolFormatter(view.name)?.call?.(args);
+		customCall = toolFormatter(view.name)?.call?.(args, { name: view.name });
 	} catch {
 		/* Keep the generic heading. */
 	}
 	const label = inline(customCall?.label ?? view.name.replace(/^mcp__(.*?)__/, "$1/"));
 	const detail = summary(view, theme);
+	const savedSubject =
+		view.status !== "running" && toolFormatter(view.name)
+			? (view.stats ?? (view.result ? resultStats(view.name, view.result, view.args) : undefined))
+					?.subject
+			: undefined;
 	const prefix = `${marker} ${theme.fg("toolTitle", label)}`;
 	let range = "";
 	if (view.name === "read" && (typeof args.offset === "number" || typeof args.limit === "number")) {
@@ -338,9 +352,10 @@ export function renderTool(
 		: 0;
 	const pathWidth = Math.max(0, remaining - (search ? patternWidth + 3 : 0));
 	const subject =
-		(customCall?.subject !== undefined
-			? inline(customCall.subject)
-			: target(view.name, view.args, env.cwd, pathWidth)) ||
+		(savedSubject ??
+			(customCall?.subject !== undefined
+				? inline(customCall.subject)
+				: target(view.name, view.args, env.cwd, pathWidth))) ||
 		(view.argumentsUnavailable ? "[arguments unavailable]" : "");
 	let styledSubject =
 		typeof args.path === "string"

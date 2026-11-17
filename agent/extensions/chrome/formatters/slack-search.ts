@@ -45,7 +45,7 @@ function resultCount(value: unknown, depth = 0): number | undefined {
 
 const slackSearch: ToolFormatter = {
 	tools: ["mcp__slack__slack_search_public", "mcp__slack__slack_search_public_and_private"],
-	call(args) {
+	call(args, context) {
 		const keywords = Array.isArray(args.keywords)
 			? args.keywords.filter((word: unknown) => typeof word === "string").join(" ")
 			: "";
@@ -57,7 +57,12 @@ const slackSearch: ToolFormatter = {
 				: typeof args.natural_language_query === "string"
 					? args.natural_language_query
 					: "");
-		return { label: "slack search", subject: query };
+		return {
+			label: context.name.endsWith("slack_search_public_and_private")
+				? "slack search all"
+				: "slack search",
+			subject: query,
+		};
 	},
 	result(result) {
 		let count = resultCount(result.structuredContent);

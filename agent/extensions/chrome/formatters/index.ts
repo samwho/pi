@@ -1,9 +1,21 @@
 import slackSearch from "./slack-search.ts";
+import slackRead from "./slack-read.ts";
+import cloud from "./cloud.ts";
+import knowledge from "./knowledge.ts";
+import research from "./research.ts";
+import toolbox from "./toolbox.ts";
 import type { ToolFormatter } from "./types.ts";
 export type { ToolFormatter } from "./types.ts";
 
 // Add/remove one module here to enable/disable a customisation.
-const formatters: ToolFormatter[] = [slackSearch];
+const formatters: ToolFormatter[] = [
+	slackSearch,
+	...slackRead,
+	...cloud,
+	...knowledge,
+	...research,
+	...toolbox,
+];
 const normalise = (name: string) => name.replace(/-/g, "_");
 const registry = new Map<string, ToolFormatter>();
 for (const formatter of formatters) {
