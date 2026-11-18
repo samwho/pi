@@ -8,10 +8,11 @@ import {
 	wrapTextWithAnsi,
 	parseColor,
 } from "@earendil-works/pi-tui";
-import type { ShellRenderer } from "./shell.ts";
+import type { ShellRenderer, ShellRowState } from "./shell.ts";
 import type { CallHighlighting } from "./call-highlighting.ts";
 import { CHROME_TOOL, type ChromeToolComponent } from "./tool-layout.ts";
 import { toolFormatter } from "./formatters/index.ts";
+import { usageLabels, type UsageSample } from "./bash-usage.ts";
 
 export type Result = {
 	content?: Array<{ type: string; text?: string; mimeType?: string }>;
@@ -45,8 +46,10 @@ export type RenderEnvironment = {
 	expanded: boolean;
 	invalidate: () => void;
 	shell: ShellRenderer;
+	shellRows: ShellRowState;
 	highlighting: CallHighlighting;
 	children: (view: ToolView) => ToolView[];
+	bashUsage: (id: string) => UsageSample | undefined;
 	errorHint: string;
 	width?: number;
 };
@@ -209,8 +212,10 @@ function summary(view: ToolView, theme: Theme): string {
 			parts.push(`~${input.toLocaleString("en-US")} input tokens`);
 		}
 		const stats = view.result ? resultStats(view.name, view.result) : view.stats;
-		if (stats || view.status !== "running")
-			parts.push(`~${stats ? stats.tokens.toLocaleString("en-US") : "?"} output tokens`);
+		if (stats || view.name === "bash" || view.status !== "running") {
+			const tokens = stats?.tokens ?? (view.status === "running" ? 0 : undefined);
+			parts.push(`~${tokens?.toLocaleString("en-US") ?? "?"} output tokens`);
+		}
 		return theme.fg("muted", parts.join(" · "));
 	}
 	if (view.status === "running") {
@@ -386,14 +391,32 @@ export function renderTool(
 		}
 	}
 	styledSubject = truncateToWidth(styledSubject, subjectWidth, theme.fg("muted", "…"));
-	const title = `${prefix}${subject ? ` ${styledSubject}` : ""}${detail ? `${theme.fg("muted", " · ")}${detail}` : ""}`;
+	const separator = theme.fg("muted", " · ");
+	let title = `${prefix}${subject ? ` ${styledSubject}` : ""}${detail ? separator + detail : ""}`;
+	if (view.name === "bash" && view.status === "running") {
+		let statBudget = (env.width ?? Infinity) - indent - visibleWidth(title);
+		for (const stat of usageLabels(env.bashUsage(view.id))) {
+			const width = visibleWidth(separator) + visibleWidth(stat.label);
+			if (width > statBudget) continue;
+			title += separator + theme.fg(stat.color, stat.label);
+			statBudget -= width;
+		}
+	}
 	const lines: Line[] = [{ text: title, indent }];
 	const command = record(view.args).command;
 	if (typeof command === "string" && (view.name === "bash" || view.name === "powershell")) {
 		const source = clean(command);
 		const highlighted =
 			view.name === "bash"
-				? env.shell.lines(source, env.cwd, view.complete, view.id, env.invalidate, theme)
+				? env.shell.lines(
+						source,
+						env.cwd,
+						view.complete,
+						env.shellRows,
+						view.id,
+						env.invalidate,
+						theme,
+					)
 				: highlightCode(source, "powershell");
 		lines.push(...highlighted.map((text) => ({ text, indent: indent + 2, wrap: true })));
 	}

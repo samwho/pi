@@ -21,7 +21,10 @@ type ShellView = {
 	tokens?: Record<string, ThemedToken[][]>;
 	commands: CommandSpan[];
 };
-type Entry = { view: ShellView; pending: boolean; listeners: Map<string, () => void> };
+type Entry = { view: ShellView; pending: boolean; invalidate?: () => void };
+/** Owned by one transcript row, including its nested calls; never globally evicted. */
+export type ShellRowState = Map<string, { key: string; entry: Entry }>;
+const PREPARATION_CONCURRENCY = 2;
 
 function object(value: unknown): Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -31,7 +34,8 @@ function object(value: unknown): Record<string, unknown> {
 
 /** shfmt supplies real Bash parsing; no command is ever evaluated to colour it. */
 export class ShellRenderer {
-	private cache = new Map<string, Entry>();
+	private queue: Array<{ run: () => void; cancel: () => void }> = [];
+	private activePreparations = 0;
 	private processes = new Set<ChildProcess>();
 	private highlighter?: Promise<Highlighter>;
 	private closed = false;
@@ -60,6 +64,28 @@ export class ShellRenderer {
 			this.processes.add(child);
 			child.stdin?.on("error", () => {});
 			child.stdin?.end(source);
+		});
+	}
+
+	/** Bound the whole preparation pipeline, not just individual shfmt invocations. */
+	private schedule(source: string, cwd: string): Promise<ShellView> {
+		return new Promise((resolveResult, reject) => {
+			const cancel = () => reject(new Error("Shell renderer closed"));
+			if (this.closed) {
+				cancel();
+				return;
+			}
+			const run = () => {
+				this.activePreparations++;
+				void this.prepare(source, cwd)
+					.then(resolveResult, reject)
+					.finally(() => {
+						this.activePreparations--;
+						if (!this.closed) this.queue.shift()?.run();
+					});
+			};
+			if (this.activePreparations < PREPARATION_CONCURRENCY) run();
+			else this.queue.push({ run, cancel });
 		});
 	}
 
@@ -192,6 +218,7 @@ export class ShellRenderer {
 			/* Incomplete or unsupported syntax remains fully visible. */
 		}
 		const commands = await this.commands(formatted, cwd).catch(() => [] as CommandSpan[]);
+		if (this.closed) return { source: formatted, commands };
 		this.highlighter ??= createHighlighter({ themes: [...THEMES], langs: ["bash"] });
 		try {
 			const highlighter = await this.highlighter;
@@ -211,6 +238,7 @@ export class ShellRenderer {
 		source: string,
 		cwd: string,
 		complete: boolean,
+		rows: ShellRowState,
 		owner: string,
 		invalidate: () => void,
 		theme: Theme,
@@ -225,25 +253,27 @@ export class ShellRenderer {
 			process.env.OLDPWD,
 			process.env.BASH_ENV,
 		]);
-		let entry = this.cache.get(key);
+		const saved = rows.get(owner);
+		let entry = saved?.key === key ? saved.entry : undefined;
 		if (!entry) {
-			entry = { view: { source, commands: [] }, pending: true, listeners: new Map() };
-			this.cache.set(key, entry);
+			entry = { view: { source, commands: [] }, pending: true };
+			rows.set(owner, { key, entry });
 			const retained = entry;
-			void this.prepare(source, cwd)
+			void this.schedule(source, cwd)
 				.then((view) => {
 					retained.view = view;
 					retained.pending = false;
-					if (!this.closed) for (const notify of retained.listeners.values()) notify();
-					retained.listeners.clear();
+					const notify = retained.invalidate;
+					retained.invalidate = undefined;
+					// Arguments may have changed while the old preparation was queued.
+					if (!this.closed && rows.get(owner)?.entry === retained) notify?.();
 				})
 				.catch(() => {
 					retained.pending = false;
-					retained.listeners.clear();
+					retained.invalidate = undefined;
 				});
-			if (this.cache.size > 128) this.cache.delete(this.cache.keys().next().value!);
 		}
-		if (entry.pending) entry.listeners.set(owner, invalidate);
+		if (entry.pending) entry.invalidate = invalidate;
 		const view = entry.view;
 		const tokens = view.tokens?.[theme.appearance === "light" ? "github-light" : "github-dark"];
 		if (!tokens) return view.source.split("\n").map((line) => theme.fg("toolOutput", line));
@@ -283,10 +313,11 @@ export class ShellRenderer {
 	}
 
 	dispose(): void {
+		if (this.closed) return;
 		this.closed = true;
+		for (const job of this.queue.splice(0)) job.cancel();
 		for (const child of this.processes) child.kill();
 		this.processes.clear();
-		this.cache.clear();
 		void this.highlighter?.then((highlighter) => highlighter.dispose()).catch(() => {});
 	}
 }

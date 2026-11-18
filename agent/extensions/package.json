@@ -7,7 +7,7 @@
 		"format:check": "oxfmt --check .",
 		"lint": "oxlint . --type-aware --type-check --tsconfig tsconfig.json --deny-warnings",
 		"typecheck": "tsc --noEmit -p tsconfig.json",
-		"test": "vitest run read-agents shared --config chrome/vitest.config.ts",
+		"test": "vitest run read-agents shared chrome --config chrome/vitest.config.ts",
 		"check": "npm run format:check && npm run lint && npm run typecheck && npm run test"
 	},
 	"dependencies": {

@@ -11,22 +11,29 @@ import {
 	type ResultStats,
 	type ToolView,
 } from "./render.ts";
-import { ShellRenderer } from "./shell.ts";
+import { ShellRenderer, type ShellRowState } from "./shell.ts";
 import { CallHighlighting } from "./call-highlighting.ts";
 import registerSessionFooter from "./session-footer.ts";
 import registerWelcomeHeader from "./welcome-header.ts";
 import { installToolGrouping } from "./tool-layout.ts";
+import { installBashUsage } from "./bash-usage.ts";
 
 const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const EMPTY = { render: () => [] as string[], invalidate() {} };
 const STATS_ENTRY = "chrome-tool-stats/v1";
-type RowState = { result?: Result; startedAt?: number; durationMs?: number };
+type RowState = {
+	result?: Result;
+	startedAt?: number;
+	durationMs?: number;
+	shellRows?: ShellRowState;
+};
 
-/** Display-only: the same renderer handles direct, nested, live, and restored calls. */
+/** The same renderer handles direct, nested, live, and restored calls. */
 export default function chrome(pi: ExtensionAPI): void {
 	registerSessionFooter(pi);
 	registerWelcomeHeader(pi);
 	const stopGrouping = installToolGrouping();
+	const bashUsage = installBashUsage(pi);
 	// Consecutive thinking summaries stay visible as one naturally wrapping paragraph.
 	// This changes display only, including streamed and restored thinking runs.
 	pi.registerMarkdownTransformer(
@@ -198,6 +205,14 @@ export default function chrome(pi: ExtensionAPI): void {
 			complete: true,
 		});
 	});
+	pi.on("tool_execution_update", (event, ctx) => {
+		if (ctx.mode !== "tui" || event.toolName !== "bash" || !event.parentToolCallId) return;
+		const child = nested.get(event.parentToolCallId)?.get(event.toolCallId);
+		if (child?.status === "running") {
+			const stats = resultStats("bash", event.partialResult as Result);
+			if (stats) child.stats = { tokens: stats.tokens };
+		}
+	});
 	pi.on("tool_execution_end", (event, ctx) => {
 		if (ctx.mode !== "tui" || !event.parentToolCallId) return;
 		const previous = nested.get(event.parentToolCallId)?.get(event.toolCallId);
@@ -231,6 +246,7 @@ export default function chrome(pi: ExtensionAPI): void {
 			else pending.delete(context.toolCallId);
 			// Rendering is deferred until both slots have updated shared row state.
 			const state = context.state as RowState;
+			const shellRows = (state.shellRows ??= new Map());
 			if (context.isPartial && context.executionStarted) state.startedAt ??= performance.now();
 			if (!context.isPartial && state.startedAt !== undefined)
 				state.durationMs ??= performance.now() - state.startedAt;
@@ -252,8 +268,10 @@ export default function chrome(pi: ExtensionAPI): void {
 					expanded: context.expanded,
 					invalidate: context.invalidate,
 					shell,
+					shellRows,
 					highlighting,
 					children,
+					bashUsage,
 					errorHint: context.keyHint("app.tools.expand", "for full error"),
 				}),
 			);

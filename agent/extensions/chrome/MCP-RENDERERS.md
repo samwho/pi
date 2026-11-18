@@ -10,6 +10,35 @@
 - Inspected the current definitions of all 76 tools. Historical codemode output supplied additional transport/field-shape evidence where available; child results themselves are not stored by Pi.
 - This report contains tool names/counts only. No chat excerpts, resource identifiers, credentials, or real document titles are included.
 
+## Grafana follow-up (2026-11-18)
+
+A two-week scan of 177 session files found 127 distinct recorded Grafana calls
+across four sessions, before validation. Counts include nested calls and exclude
+tool discovery, prose, and script mentions. All seven observed methods have
+formatters:
+
+| Method | Calls |
+| --- | ---: |
+| `query_prometheus` | 94 |
+| `search_dashboards` | 12 |
+| `list_prometheus_label_names` | 7 |
+| `list_prometheus_metric_names` | 5 |
+| `get_dashboard_property` | 5 |
+| `list_datasources` | 3 |
+| `get_dashboard_panel_queries` | 1 |
+
+PromQL headings show the expression with string literals masked, the query
+mode, and the time window. Recognized results show series and sample counts.
+List headings count returned entries and only say `more available` when
+Grafana reports it. Dashboard property reads show the JSONPath and output-token
+estimate; raw values, panel query payloads, and URLs stay in the expanded view.
+
+```text
+✓ grafana PromQL rate(http_requests_total{job="…"}[5m]) · range · now-1h → now · step 60s · 3 series · 183 samples
+✓ grafana dashboards queue · starred · 4 dashboards · more available
+✓ grafana dashboard property $.panels[*].title · ops-overview · ~42 tokens
+```
+
 ## Connections
 
 | Connection             | Calls |

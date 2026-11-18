@@ -1,7 +1,7 @@
 # Chrome
 
-Compact tool rendering through Pi's public `registerToolRenderer` API. Execution,
-schemas, prompts, and model-facing results are unchanged. A scoped layout adapter
+Compact tool rendering through Pi's public `registerToolRenderer` API. Schemas,
+prompts, and model-facing results are unchanged. A scoped layout adapter
 handles consecutive tool groups; it is removed on shutdown or reload.
 
 ## Layout
@@ -72,8 +72,27 @@ through the display stats entries; old absent counts remain explicitly unknown.
   Final durations use Pi's recorded execution time and remain visible after
   completion, including restored nested calls with duration metadata. Output-token
   estimates include returned text/images, not hidden reasoning or billed usage.
-- Formatting/highlighting run asynchronously and are cached. Incomplete input or
-  formatter failure keeps the original source visible. Source is never evaluated.
+- Running Bash headings (including nested calls) show numeric CPU, RAM, and
+  download/upload rates alongside elapsed time and estimated output tokens.
+  Readings update once a second and are omitted if the width is too narrow.
+  CPU is measured in percent of one core; RAM is summed resident memory.
+  On macOS, one shared `ps` query finds the active process groups and one
+  `nettop` query measures network traffic for those PIDs, not the whole host.
+  Workers that leave their process group and sockets that close between samples
+  can be missed. Network rates are unavailable on Linux and shown as `—`.
+- In the macOS/Linux TUI, a small launcher reports the process-group ID before
+  handing the original command to Bash. Pi's backend still handles output,
+  timeouts, and cancellation. Sampling is local and in-memory; it stops when
+  the call ends. Custom shell paths, other Bash overrides, and non-TUI modes
+  are left alone.
+- Formatting/highlighting run asynchronously. Each top-level row retains preparation
+  for itself and its nested calls in Pi's row-local state, across redraws, resizes,
+  and expansion changes. Results are released with the row, not evicted by a global
+  command-count limit. Changed source, working directory, or shell environment
+  triggers fresh preparation. At most two preparation pipelines run concurrently;
+  shutdown cancels queued work and stops only this renderer's formatter children.
+  Incomplete input or formatter failure keeps the original source visible. Source
+  is never evaluated.
 
 `shell-environment.ts` statically tracks directory and PATH changes in straight-line
 statements and successful `&&` chains. It handles `export PATH=...`, standalone
@@ -132,13 +151,15 @@ use this path. Short sanitised result summaries (up to 256 characters) and resol
 subjects (up to 512) are saved with the existing hidden stats metadata, so future
 nested calls retain their useful names and outcomes after reload.
 
-The modules cover the 76 actual tool names found in the two-week history audit:
+The modules cover the tool names found in the history audits:
 
 - `cloud.ts`: Laravel Cloud and its separately labelled personal connection.
 - `knowledge.ts`: Linear issues and Notion search/read/update/create/access.
 - `research.ts`: Drew document search/read and Atuin history/thread/output tools.
 - `slack-search.ts`, `slack-read.ts`: Slack search, threads, and files.
 - `toolbox.ts`: management discovery, calls, and explicit validation-only display.
+- `grafana.ts`: PromQL, dashboard search and inspection, metric/label discovery,
+  and datasources.
 - `shared.ts`: conservative payload decoding, returned-item counts, pagination,
   safe resource references, and secret-safe changed-field labels.
 
@@ -169,5 +190,4 @@ mouse coordinates back to their original components. Both the bridge and contain
 methods are restored on shutdown/reload; there are no persistent renderer patches.
 This adapter depends on Pi's internal chat-container and call-component fields.
 
-No new tests yet. `chrome/vitest.config.ts` supplies host-package resolution only
-for the existing read-agents and shared tests.
+`chrome/vitest.config.ts` supplies host-package resolution for extension tests.

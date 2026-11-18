@@ -4,6 +4,7 @@ import cloud from "./cloud.ts";
 import knowledge from "./knowledge.ts";
 import research from "./research.ts";
 import toolbox from "./toolbox.ts";
+import grafana from "./grafana.ts";
 import type { ToolFormatter } from "./types.ts";
 export type { ToolFormatter } from "./types.ts";
 
@@ -15,6 +16,7 @@ const formatters: ToolFormatter[] = [
 	...knowledge,
 	...research,
 	...toolbox,
+	...grafana,
 ];
 const normalise = (name: string) => name.replace(/-/g, "_");
 const registry = new Map<string, ToolFormatter>();
