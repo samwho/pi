@@ -25,6 +25,8 @@ type Entry = { view: ShellView; pending: boolean; invalidate?: () => void };
 /** Owned by one transcript row, including its nested calls; never globally evicted. */
 export type ShellRowState = Map<string, { key: string; entry: Entry }>;
 const PREPARATION_CONCURRENCY = 2;
+const SHARED_PREPARATIONS = 128;
+const REUSE_MS = 2_000;
 
 function object(value: unknown): Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -38,6 +40,7 @@ export class ShellRenderer {
 	private activePreparations = 0;
 	private processes = new Set<ChildProcess>();
 	private highlighter?: Promise<Highlighter>;
+	private recent = new Map<string, { job: Promise<ShellView>; until: number }>();
 	private closed = false;
 
 	private run(source: string, args: string[], cwd: string): Promise<string> {
@@ -65,6 +68,25 @@ export class ShellRenderer {
 			child.stdin?.on("error", () => {});
 			child.stdin?.end(source);
 		});
+	}
+
+	private prepareShared(key: string, source: string, cwd: string): Promise<ShellView> {
+		const existing = this.recent.get(key);
+		if (existing && existing.until > performance.now()) return existing.job;
+		const entry = { job: this.schedule(source, cwd), until: Infinity };
+		this.recent.delete(key);
+		this.recent.set(key, entry);
+		if (this.recent.size > SHARED_PREPARATIONS)
+			this.recent.delete(this.recent.keys().next().value!);
+		void entry.job.then(
+			() => {
+				entry.until = performance.now() + REUSE_MS;
+			},
+			() => {
+				if (this.recent.get(key) === entry) this.recent.delete(key);
+			},
+		);
+		return entry.job;
 	}
 
 	/** Bound the whole preparation pipeline, not just individual shfmt invocations. */
@@ -242,8 +264,9 @@ export class ShellRenderer {
 		owner: string,
 		invalidate: () => void,
 		theme: Theme,
+		defer = false,
 	): string[] {
-		if (!complete || this.closed)
+		if (!complete || this.closed || (defer && !rows.has(owner)))
 			return source.split("\n").map((line) => theme.fg("toolOutput", line));
 		const key = JSON.stringify([
 			source,
@@ -252,6 +275,7 @@ export class ShellRenderer {
 			process.env.HOME,
 			process.env.OLDPWD,
 			process.env.BASH_ENV,
+			Object.keys(process.env).filter((name) => name.startsWith("BASH_FUNC_")),
 		]);
 		const saved = rows.get(owner);
 		let entry = saved?.key === key ? saved.entry : undefined;
@@ -259,7 +283,7 @@ export class ShellRenderer {
 			entry = { view: { source, commands: [] }, pending: true };
 			rows.set(owner, { key, entry });
 			const retained = entry;
-			void this.schedule(source, cwd)
+			void this.prepareShared(key, source, cwd)
 				.then((view) => {
 					retained.view = view;
 					retained.pending = false;
@@ -318,6 +342,7 @@ export class ShellRenderer {
 		for (const job of this.queue.splice(0)) job.cancel();
 		for (const child of this.processes) child.kill();
 		this.processes.clear();
+		this.recent.clear();
 		void this.highlighter?.then((highlighter) => highlighter.dispose()).catch(() => {});
 	}
 }

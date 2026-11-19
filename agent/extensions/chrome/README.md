@@ -10,7 +10,10 @@ handles consecutive tool groups; it is removed on shutdown or reload.
 Padding surrounds each consecutive run of visible tool calls, not individual
 calls. Adjacent top-level tools and nested lists have no internal padding. Visible
 prose, thinking, or other transcript content ends a run; invisible messages do not.
-Calls have a neutral background, a status marker, and a tool heading.
+Calls have a neutral background, a status marker, and a tool heading. Each
+shaded group shows the age of its first call at the right of the first heading.
+The heading truncates before the age is obscured. Ages refresh on redraw, and
+restored groups use the recorded message timestamp.
 Nested calls form a compact indented list below `codemode`, without frames or
 source-code boxes. Codemode shows a spinner during writing/execution. Edit
 additions are green and removals are red. Grep regexes use Shiki's regexp grammar
@@ -85,7 +88,11 @@ through the display stats entries; old absent counts remain explicitly unknown.
   timeouts, and cancellation. Sampling is local and in-memory; it stops when
   the call ends. Custom shell paths, other Bash overrides, and non-TUI modes
   are left alone.
-- Formatting/highlighting run asynchronously. Each top-level row retains preparation
+- Formatting/highlighting run asynchronously. Restored commands are prepared near
+  the viewport rather than all at startup. Fullscreen scrolling prepares older
+  rows as they come into range; regular terminal scrollback shows original text
+  for rows outside the startup viewport. Matching command preparations share
+  in-flight work and can be reused briefly across rows. Each top-level row retains preparation
   for itself and its nested calls in Pi's row-local state, across redraws, resizes,
   and expansion changes. Results are released with the row, not evicted by a global
   command-count limit. Changed source, working directory, or shell environment
@@ -188,6 +195,10 @@ Only that container's render/mouse methods are adapted. Original transcript
 children, execution, and expansion state remain untouched. Grouped rows translate
 mouse coordinates back to their original components. Both the bridge and container
 methods are restored on shutdown/reload; there are no persistent renderer patches.
-This adapter depends on Pi's internal chat-container and call-component fields.
+Completed tool rows cache their rendered lines at the current width, with a
+separate cache for the changing age label. Pi's display invalidation and async
+highlighting updates refresh the row. The grouping pass reuses the lines it
+already measured for non-tool components, including their original mouse targets.
+This adapter depends on Pi's internal chat-container, viewport, and call-component fields.
 
 `chrome/vitest.config.ts` supplies host-package resolution for extension tests.

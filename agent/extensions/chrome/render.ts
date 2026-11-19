@@ -47,6 +47,7 @@ export type RenderEnvironment = {
 	invalidate: () => void;
 	shell: ShellRenderer;
 	shellRows: ShellRowState;
+	deferShell?: boolean;
 	highlighting: CallHighlighting;
 	children: (view: ToolView) => ToolView[];
 	bashUsage: (id: string) => UsageSample | undefined;
@@ -416,6 +417,7 @@ export function renderTool(
 						view.id,
 						env.invalidate,
 						theme,
+						env.deferShell && view.status !== "running",
 					)
 				: highlightCode(source, "powershell");
 		lines.push(...highlighted.map((text) => ({ text, indent: indent + 2, wrap: true })));
@@ -451,8 +453,22 @@ export function renderTool(
 export function toolComponent(
 	view: () => ToolView,
 	environment: () => RenderEnvironment,
+	timestamp?: () => number | undefined,
+	shellVisibility?: { ready?: boolean },
 ): ChromeToolComponent {
+	let cached: { width: number; result?: Result; lines: string[] } | undefined;
+	let ageCache: { line: string; width: number; age: string; row: string } | undefined;
 	return {
+		toolTimestamp: timestamp,
+		prepareVisibleShell:
+			shellVisibility && !shellVisibility.ready
+				? () => {
+						if (shellVisibility.ready) return;
+						shellVisibility.ready = true;
+						cached = undefined;
+						queueMicrotask(environment().invalidate);
+					}
+				: undefined,
 		[CHROME_TOOL]: (width, image) => {
 			// ECH paints the image's protocol row without advancing the cursor or
 			// interfering with iTerm's cursor-up image positioning.
@@ -460,11 +476,42 @@ export function toolComponent(
 			const content = image === undefined ? " ".repeat(columns) : `\x1b[${columns}X${image}`;
 			return environment().theme.bg("toolPendingBg", content);
 		},
+		headingWithAge(line, columns, age) {
+			if (ageCache?.line === line && ageCache.width === columns && ageCache.age === age)
+				return ageCache.row;
+			const { theme } = environment();
+			const rightPad = visibleWidth(age) < columns ? 1 : 0;
+			const time = truncateToWidth(age, columns - rightPad);
+			const leftWidth = Math.max(0, columns - visibleWidth(time) - rightPad - 1);
+			// The original heading is padded. Only show an ellipsis if actual text was clipped.
+			const clipped = visibleWidth(stripVTControlCharacters(line).trimEnd()) > leftWidth;
+			const left = leftWidth
+				? truncateToWidth(line, leftWidth, clipped ? theme.fg("muted", "…") : "")
+				: "";
+			const background = theme.getBgAnsi("toolPendingBg");
+			const row = theme.bg(
+				"toolPendingBg",
+				left.replace(/\x1b\[(?:0|49)?m/g, (reset) => reset + background) +
+					" ".repeat(Math.max(0, columns - visibleWidth(left) - visibleWidth(time) - rightPad)) +
+					theme.fg("muted", time) +
+					" ".repeat(rightPad),
+			);
+			ageCache = { line, width: columns, age, row };
+			return row;
+		},
 		render(width) {
 			const columns = Math.max(1, width);
-			const env = { ...environment(), width: columns };
-			const lines = renderTool(view(), env);
-			return lines.flatMap((line) => {
+			const current = view();
+			const settled = current.status !== "running";
+			if (settled && cached?.width === columns && cached.result === current.result)
+				return cached.lines;
+			const env = {
+				...environment(),
+				width: columns,
+				deferShell: shellVisibility && !shellVisibility.ready,
+			};
+			const background = env.theme.getBgAnsi("toolPendingBg");
+			const lines = renderTool(current, env).flatMap((line) => {
 				const indent = Math.min(line.indent, Math.max(0, columns - 1));
 				const available = columns - indent;
 				const content = line.wrap
@@ -473,7 +520,6 @@ export function toolComponent(
 				return content.map((part) => {
 					// Truncation inserts a full reset before its ellipsis. Keep the row's
 					// background through that reset (and any wrapped/highlighted resets).
-					const background = env.theme.getBgAnsi("toolPendingBg");
 					const painted = part.replace(/\x1b\[(?:0|49)?m/g, (reset) => reset + background);
 					const row = " ".repeat(indent) + painted;
 					return env.theme.bg(
@@ -482,7 +528,11 @@ export function toolComponent(
 					);
 				});
 			});
+			if (settled) cached = { width: columns, result: current.result, lines };
+			return lines;
 		},
-		invalidate() {},
+		invalidate() {
+			cached = ageCache = undefined;
+		},
 	};
 }

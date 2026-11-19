@@ -26,6 +26,7 @@ type RowState = {
 	startedAt?: number;
 	durationMs?: number;
 	shellRows?: ShellRowState;
+	shellVisibility?: { ready?: boolean };
 };
 
 /** The same renderer handles direct, nested, live, and restored calls. */
@@ -60,9 +61,25 @@ export default function chrome(pi: ExtensionAPI): void {
 	// untruncated arguments (within Pi's documented recording limits).
 	const savedArguments = new Map<string, Record<string, unknown>>();
 	const savedStats = new Map<string, ResultStats>();
+	const toolTimes = new Map<string, number>();
 
-	function rememberSavedArguments(value: unknown): void {
+	function rememberMessage(value: unknown): void {
 		const message = record(value);
+		const timestamp = message.timestamp;
+		if (typeof timestamp === "number" && Number.isFinite(timestamp)) {
+			if (message.role === "assistant" && Array.isArray(message.content)) {
+				for (const part of message.content as unknown[]) {
+					const call = record(part);
+					if (call.type === "toolCall" && typeof call.id === "string" && !toolTimes.has(call.id))
+						toolTimes.set(call.id, timestamp);
+				}
+			} else if (
+				message.role === "toolResult" &&
+				typeof message.toolCallId === "string" &&
+				!toolTimes.has(message.toolCallId)
+			)
+				toolTimes.set(message.toolCallId, timestamp);
+		}
 		if (message.role !== "toolResult") return;
 		const calls = record(message.nestedCalls).calls;
 		if (!Array.isArray(calls)) return;
@@ -81,8 +98,9 @@ export default function chrome(pi: ExtensionAPI): void {
 	function restoreSavedArguments(ctx: ExtensionContext): void {
 		savedArguments.clear();
 		savedStats.clear();
+		toolTimes.clear();
 		for (const entry of ctx.sessionManager.getBranch()) {
-			if (entry.type === "message") rememberSavedArguments(entry.message);
+			if (entry.type === "message") rememberMessage(entry.message);
 			else if (entry.type === "custom" && entry.customType === STATS_ENTRY) {
 				const data = record(entry.data);
 				const stats = record(data.stats);
@@ -180,7 +198,7 @@ export default function chrome(pi: ExtensionAPI): void {
 		}, 100);
 		timer.unref();
 	});
-	pi.on("message_end", (event) => rememberSavedArguments(event.message));
+	pi.on("message_end", (event) => rememberMessage(event.message));
 	pi.on("session_tree", (_event, ctx) => restoreSavedArguments(ctx));
 	pi.on("session_compact", (_event, ctx) => restoreSavedArguments(ctx));
 	pi.on("agent_settled", () => pending.clear());
@@ -191,11 +209,16 @@ export default function chrome(pi: ExtensionAPI): void {
 		nested.clear();
 		savedArguments.clear();
 		savedStats.clear();
+		toolTimes.clear();
 		shell.dispose();
 		highlighting.dispose();
 	});
 	pi.on("tool_execution_start", (event, ctx) => {
-		if (ctx.mode !== "tui" || !event.parentToolCallId) return;
+		if (ctx.mode !== "tui") return;
+		if (!event.parentToolCallId) {
+			toolTimes.set(event.toolCallId, Date.now());
+			return;
+		}
 		remember(event.parentToolCallId, {
 			id: event.toolCallId,
 			name: event.toolName,
@@ -274,6 +297,8 @@ export default function chrome(pi: ExtensionAPI): void {
 					bashUsage,
 					errorHint: context.keyHint("app.tools.expand", "for full error"),
 				}),
+				() => toolTimes.get(context.toolCallId),
+				name === "bash" || name === "codemode" ? (state.shellVisibility ??= {}) : undefined,
 			);
 		},
 		renderResult(result: Result, _options, _theme, context) {
